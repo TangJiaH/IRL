@@ -37,3 +37,4 @@ battle_field_center: [120.0, 60.0, 0.0]
 AltitudeReward_safe_altitude: 4.0
 AltitudeReward_danger_altitude: 3.5
 AltitudeReward_Kv: 0.2
+HeadingReward_weights: [0.25, 0.25, 0.25, 0.25]
