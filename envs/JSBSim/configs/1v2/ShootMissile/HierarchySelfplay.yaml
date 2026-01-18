@@ -1,0 +1,81 @@
+# task config
+task: hierarchical_singlecombat_shoot
+
+# simulation config
+sim_freq: 60
+agent_interaction_steps: 12 # step 0.2s
+
+# termination config
+max_steps: 1000             # episode length: 200s
+altitude_limit: 2500
+acceleration_limit_x: 10.0
+acceleration_limit_y: 10.0
+acceleration_limit_z: 10.0
+
+# aircraft config
+aircraft_configs: {
+  A0100: {
+    color: Red,
+    model: f16,
+    init_state: {
+      ic_long_gc_deg: 119.92,
+      ic_lat_geod_deg: 59.92,
+      ic_h_sl_ft: 20000,
+      ic_psi_true_deg: 0,
+      ic_u_fps: 800.0,
+    },
+    missile: 2
+  },
+  A0200: {
+    color: Red,
+    model: f16,
+    init_state: {
+      ic_long_gc_deg: 120.08,
+      ic_lat_geod_deg: 59.92,
+      ic_h_sl_ft: 20000,
+      ic_psi_true_deg: 0,
+      ic_u_fps: 800.0,
+    },
+    missile: 2
+  },
+  B0100: {
+    color: Blue,
+    model: f16,
+    init_state: {
+      ic_h_sl_ft: 20000,
+      ic_lat_geod_deg: 60.08,
+      ic_long_gc_deg: 120.0,
+      ic_psi_true_deg: 180.0,
+      ic_u_fps: 800.0,
+    },
+    missile: 3,
+  }
+}
+max_attack_angle: 30        # unit: degree
+max_attack_distance: 14000  # unit: m
+min_attack_interval: 125     # unit: step
+# (lontitude, latitude, altitude)
+battle_field_center: [120.0, 60.0, 0.0]
+
+# reward config
+MissilePostureReward_scale: 2.0
+
+PostureReward_scale: 15.0
+PostureReward_potential: true
+PostureReward_orientation_version: v2
+PostureReward_range_version: v3
+
+AltitudeReward_scale: 30.0
+AltitudeReward_safe_altitude: 4.0
+AltitudeReward_danger_altitude: 3.5
+AltitudeReward_potential: true
+AltitudeReward_Kv: 0.2
+
+EventDrivenReward_scale: 1
+EventDrivenReward_potential: false
+
+BoundaryReward_safe_radius: 10.0      # km
+BoundaryReward_danger_radius: 12.0    # km
+BoundaryReward_Kr: 0.3               # m/s
+BoundaryReward_scale: 0.5  #5.0
+#BoundaryReward_potential: true

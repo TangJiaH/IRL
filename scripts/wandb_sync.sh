@@ -1,0 +1,1 @@
+wandb sync D:/Plane/LAG/scripts/results/MultipleCombat/2v2/ShootMissile/HierarchySelfplay/mappo/v30/wandb/run-20250530_161530-ncupnz58/run-ncupnz58.wandb
