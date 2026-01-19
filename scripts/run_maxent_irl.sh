@@ -1,29 +1,26 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+script_dir=$(cd "$(dirname "$0")" && pwd)
+root_dir=$(cd "${script_dir}/.." && pwd)
 
-# Example script to run MaxEnt IRL training for HeadingReward weights.
-# Usage:
-#   ./scripts/run_maxent_irl.sh [EXPERT_PATH] [ENV_CONFIG] [SAMPLE_EPISODES] [MAX_STEPS] [LEARNING_RATE] [EPOCHS]
+expert_path=${1:-dataset/A05}
+env_config=${2:-1/heading}
+sample_episodes=${3:-10}
+max_steps=${4:-}
+learning_rate=${5:-0.1}
+epochs=${6:-50}
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-
-EXPERT_PATH="${1:-dataset/A05}"
-ENV_CONFIG="${2:-1/heading}"
-SAMPLE_EPISODES="${3:-10}"
-MAX_STEPS="${4:-}"
-LEARNING_RATE="${5:-0.1}"
-EPOCHS="${6:-50}"
-
-MAX_STEPS_ARG=()
-if [[ -n "${MAX_STEPS}" ]]; then
-  MAX_STEPS_ARG=("--max-steps" "${MAX_STEPS}")
+if [ -n "${max_steps}" ]; then
+    max_steps_arg="--max-steps ${max_steps}"
+else
+    max_steps_arg=""
 fi
 
-python "${ROOT_DIR}/scripts/train/train_maxent_irl.py" \
-  --expert-path "${EXPERT_PATH}" \
-  --env-config "${ENV_CONFIG}" \
-  --sample-episodes "${SAMPLE_EPISODES}" \
-  "${MAX_STEPS_ARG[@]}" \
-  --learning-rate "${LEARNING_RATE}" \
-  --epochs "${EPOCHS}"
+echo "expert_path=${expert_path}, env_config=${env_config}, sample_episodes=${sample_episodes}, max_steps=${max_steps}, learning_rate=${learning_rate}, epochs=${epochs}"
+
+python "${root_dir}/scripts/train/train_maxent_irl.py" \
+    --expert-path "${expert_path}" \
+    --env-config "${env_config}" \
+    --sample-episodes "${sample_episodes}" \
+    ${max_steps_arg} \
+    --learning-rate "${learning_rate}" \
+    --epochs "${epochs}"
