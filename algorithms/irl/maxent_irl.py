@@ -1,3 +1,4 @@
+import csv
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -95,9 +96,31 @@ def parse_acmi_file(path: Path) -> List[Tuple[float, float, float, float, Option
     return states
 
 
+def parse_csv_file(path: Path) -> List[Tuple[float, float, float, float, Optional[float], Optional[float]]]:
+    states = []
+    with path.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            time_value = _safe_float(row.get("Unix time") or row.get("Time") or row.get("Timestamp"))
+            if time_value is None:
+                continue
+            lon = _safe_float(row.get("Longitude"))
+            lat = _safe_float(row.get("Latitude"))
+            alt = _safe_float(row.get("Altitude"))
+            if lon is None or lat is None or alt is None:
+                continue
+            roll = _safe_float(row.get("Roll"))
+            yaw = _safe_float(row.get("Yaw") or row.get("Heading"))
+            states.append((time_value, lon, lat, alt, roll, yaw))
+    return states
+
+
 def trajectory_log_features_from_acmi(path: Path, scales: Optional[RewardScales] = None) -> Optional[np.ndarray]:
     scales = scales or RewardScales()
-    states = parse_acmi_file(path)
+    if path.suffix.lower() == ".csv":
+        states = parse_csv_file(path)
+    else:
+        states = parse_acmi_file(path)
     if len(states) < 2:
         return None
 
@@ -141,9 +164,16 @@ def trajectory_log_features_from_acmi(path: Path, scales: Optional[RewardScales]
 
 def load_acmi_trajectories(path: str, scales: Optional[RewardScales] = None) -> List[np.ndarray]:
     base = Path(path)
-    files = [base] if base.is_file() else sorted(base.glob("*.acmi"))
+    if base.is_file():
+        files = [base]
+    else:
+        files = sorted(base.glob("*.acmi")) + sorted(base.glob("*.csv"))
+        if not files:
+            files = sorted(base.rglob("*.acmi")) + sorted(base.rglob("*.csv"))
     trajectories = []
     for file_path in files:
+        if file_path.name.endswith(".zip.acmi"):
+            continue
         features = trajectory_log_features_from_acmi(file_path, scales=scales)
         if features is not None and len(features) > 0:
             trajectories.append(features)

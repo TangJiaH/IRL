@@ -2,12 +2,12 @@
 script_dir=$(cd "$(dirname "$0")" && pwd)
 root_dir=$(cd "${script_dir}/.." && pwd)
 
-expert_path="${root_dir}/dataset/A05"
+expert_path="${root_dir}/tacviewDataSet"
 env_config="1/heading"
-sample_episodes=10
-max_steps=100
-learning_rate=0.1
-epochs=50
+sample_episodes=50
+max_steps=150
+learning_rate=0.05
+epochs=100
 
 echo "expert_path=${expert_path}, env_config=${env_config}, sample_episodes=${sample_episodes}, max_steps=${max_steps}, learning_rate=${learning_rate}, epochs=${epochs}"
 
