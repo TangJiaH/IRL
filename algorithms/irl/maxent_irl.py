@@ -31,7 +31,10 @@ def _normalize_weights(weights: Sequence[float]) -> np.ndarray:
 def _safe_float(value: str) -> Optional[float]:
     if value is None or value == "":
         return None
-    return float(value)
+    try:
+        return float(value)
+    except ValueError:
+        return None
 
 
 def _wrap_heading_deg(angle: float) -> float:
@@ -81,9 +84,11 @@ def parse_acmi_file(path: Path) -> List[Tuple[float, float, float, float, Option
             fields = payload.split("|")
             if len(fields) < 3:
                 continue
-            lon = float(fields[0])
-            lat = float(fields[1])
-            alt = float(fields[2])
+            lon = _safe_float(fields[0])
+            lat = _safe_float(fields[1])
+            alt = _safe_float(fields[2])
+            if lon is None or lat is None or alt is None:
+                continue
             roll = _safe_float(fields[3]) if len(fields) > 3 else None
             yaw = _safe_float(fields[5]) if len(fields) > 5 else None
             states.append((current_time, lon, lat, alt, roll, yaw))

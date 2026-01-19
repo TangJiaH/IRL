@@ -1,197 +1,70 @@
 #!/usr/bin/env python
-import sys
-import os
-os.environ["WANDB_API_KEY"] = '5bd637701788e55e2ed733471cd7b4a57f6a5fef'
-os.environ["WANDB_MODE"] = "offline"
-
-import traceback
-import wandb
-import socket
-import torch
-import random
-import logging
-import numpy as np
+import argparse
+import json
 from pathlib import Path
-import setproctitle
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__)))))
-from config import get_config
-from runner.share_jsbsim_runner import ShareJSBSimRunner
-from envs.JSBSim.envs import SingleCombatEnv, SingleControlEnv, MultipleCombatEnv
-from envs.env_wrappers import SubprocVecEnv, DummyVecEnv, ShareSubprocVecEnv, ShareDummyVecEnv
-from runner.tacview import Tacview
+import yaml
 
-os.environ['NUMEXPR_MAX_THREADS'] = '16'
-
-def make_train_env(all_args):
-    def get_env_fn(rank):
-        def init_env():
-            if all_args.env_name == "SingleCombat":
-                env = SingleCombatEnv(all_args.scenario_name)
-            elif all_args.env_name == "SingleControl":
-                env = SingleControlEnv(all_args.scenario_name)
-            elif all_args.env_name == "MultipleCombat":
-                env = MultipleCombatEnv(all_args.scenario_name)
-            else:
-                logging.error("Can not support the " + all_args.env_name + "environment.")
-                raise NotImplementedError
-            env.seed(all_args.seed + rank * 1000)
-            return env
-
-        return init_env
-
-    if all_args.env_name == "MultipleCombat":
-        if all_args.n_rollout_threads == 1:
-            return ShareDummyVecEnv([get_env_fn(0)])
-        else:
-            return ShareSubprocVecEnv([get_env_fn(i) for i in range(all_args.n_rollout_threads)])
-    else:
-        if all_args.n_rollout_threads == 1:
-            return DummyVecEnv([get_env_fn(0)])
-        else:
-            return SubprocVecEnv([get_env_fn(i) for i in range(all_args.n_rollout_threads)])
+from algorithms.irl.maxent_irl import MaxEntIRL, RewardScales, load_acmi_trajectories, sample_env_trajectories
+from envs.JSBSim.envs import SingleControlEnv
+from envs.JSBSim.utils.utils import get_root_dir
 
 
-def make_eval_env(all_args):
-    def get_env_fn(rank):
-        def init_env():
-            if all_args.env_name == "SingleCombat":
-                env = SingleCombatEnv(all_args.scenario_name)
-            elif all_args.env_name == "SingleControl":
-                env = SingleControlEnv(all_args.scenario_name)
-            elif all_args.env_name == "MultipleCombat":
-                env = MultipleCombatEnv(all_args.scenario_name)
-            else:
-                logging.error("Can not support the " + all_args.env_name + "environment.")
-                raise NotImplementedError
-            env.seed(all_args.seed * 50000 + rank * 1000)
-            return env
-
-        return init_env
-
-    if all_args.env_name == "MultipleCombat":
-        if all_args.n_eval_rollout_threads == 1:
-            return ShareDummyVecEnv([get_env_fn(0)])
-        else:
-            return ShareSubprocVecEnv([get_env_fn(i) for i in range(all_args.n_eval_rollout_threads)])
-    else:
-        if all_args.n_eval_rollout_threads == 1:
-            return DummyVecEnv([get_env_fn(0)])
-        else:
-            return SubprocVecEnv([get_env_fn(i) for i in range(all_args.n_eval_rollout_threads)])
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="MaxEnt IRL for HeadingReward weights.")
+    parser.add_argument("--expert-path", type=str, default="dataset/A05",
+                        help="专家轨迹数据集路径（目录或单个 .acmi 文件）。")
+    parser.add_argument("--env-config", type=str, default="1/heading",
+                        help="JSBSim 环境配置名（相对于 envs/JSBSim/configs）。")
+    parser.add_argument("--sample-episodes", type=int, default=10,
+                        help="用于估计模型期望的随机轨迹数量。")
+    parser.add_argument("--max-steps", type=int, default=None,
+                        help="采样轨迹最大步数，默认使用环境 max_steps。")
+    parser.add_argument("--learning-rate", type=float, default=0.1,
+                        help="MaxEnt IRL 学习率。")
+    parser.add_argument("--epochs", type=int, default=50,
+                        help="MaxEnt IRL 迭代轮数。")
+    parser.add_argument("--write-config", action="store_true",
+                        help="将学习到的权重写回 JSBSim 配置文件。")
+    parser.add_argument("--output-json", type=str, default=None,
+                        help="输出权重到指定 JSON 文件。")
+    return parser.parse_args()
 
 
-def parse_args(args, parser):
-    group = parser.add_argument_group("JSBSim Env parameters")
-    group.add_argument('--scenario-name', type=str, default='singlecombat_simple',
-                       help="Which scenario to run on")
-    group.add_argument('--render-mode', type=str, default='histroy_acmi',
-                       help="Rendering mode for visualization. "
-                            "'histroy_acmi' saves trajectory data to an ACMI file at every evaluation interval, "
-                            "allowing for post-analysis of historical evaluations. "
-                            "'real_time' maintains a live connection with Tacview for real-time visualization, "
-                            "but requires Tacview Advanced support.")
-    all_args = parser.parse_known_args(args)[0]
-    return all_args
+def main() -> None:
+    args = parse_args()
+    scales = RewardScales()
 
+    expert_trajectories = load_acmi_trajectories(args.expert_path, scales=scales)
+    if not expert_trajectories:
+        raise ValueError(f"未找到专家轨迹数据，请检查路径: {args.expert_path}")
 
-def main(args):
-    parser = get_config()
-    all_args = parse_args(args, parser)
+    env = SingleControlEnv(args.env_config)
+    sampled_trajectories = sample_env_trajectories(
+        env, num_episodes=args.sample_episodes, max_steps=args.max_steps, scales=scales
+    )
+    if not sampled_trajectories:
+        raise ValueError("未采样到随机轨迹，无法进行 MaxEnt IRL。")
 
-    # seed
-    np.random.seed(all_args.seed)
-    random.seed(all_args.seed)
-    torch.manual_seed(all_args.seed)
-    torch.cuda.manual_seed_all(all_args.seed)
+    irl = MaxEntIRL(learning_rate=args.learning_rate, epochs=args.epochs)
+    result = irl.fit(expert_trajectories, sampled_trajectories)
 
-    # cuda
-    if all_args.cuda and torch.cuda.is_available():
-        logging.info("choose to use gpu...")
-        device = torch.device("cuda:0")  # use cude mask to control using which GPU
-        torch.set_num_threads(all_args.n_training_threads)
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = True
-    else:
-        logging.info("choose to use cpu...")
-        device = torch.device("cpu")
-        torch.set_num_threads(all_args.n_training_threads)
+    weights = result["weights"].tolist()
+    print("MaxEnt IRL 权重:", weights)
 
-    # run dir
-    run_dir = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + "/results") \
-              / all_args.env_name / all_args.scenario_name / all_args.algorithm_name / all_args.experiment_name
-    if not run_dir.exists():
-        os.makedirs(str(run_dir))
+    if args.output_json:
+        output_path = Path(args.output_json)
+        output_path.write_text(json.dumps({"HeadingReward_weights": weights}, indent=2), encoding="utf-8")
 
-    # wandb
-    if all_args.use_wandb:
-        run = wandb.init(config=all_args,
-                         project=all_args.env_name,
-                         notes=socket.gethostname(),
-                         name=f"{all_args.experiment_name}_seed{all_args.seed}",
-                         group=all_args.scenario_name,
-                         dir=str(run_dir),
-                         job_type="training",
-                         reinit=True)
-    else:
-        if not run_dir.exists():
-            curr_run = 'run1'
-        else:
-            exst_run_nums = [int(str(folder.name).split('run')[1]) for folder in run_dir.iterdir() if
-                             str(folder.name).startswith('run')]
-            if len(exst_run_nums) == 0:
-                curr_run = 'run1'
-            else:
-                curr_run = 'run%i' % (max(exst_run_nums) + 1)
-        run_dir = run_dir / curr_run
-        if not run_dir.exists():
-            os.makedirs(str(run_dir))
+    if args.write_config:
+        config_path = Path(get_root_dir()) / "configs" / f"{args.env_config}.yaml"
+        config_data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        config_data["HeadingReward_weights"] = weights
+        config_path.write_text(yaml.safe_dump(config_data, sort_keys=False, allow_unicode=True), encoding="utf-8")
+        print(f"已更新配置文件: {config_path}")
 
-    setproctitle.setproctitle(str(all_args.algorithm_name) + "-" + str(all_args.env_name)
-                              + "-" + str(all_args.experiment_name) + "@" + str(all_args.user_name))
-
-    # env init
-    envs = make_train_env(all_args)
-    eval_envs = make_eval_env(all_args) if all_args.use_eval else None
-
-    render_mode = all_args.render_mode
-
-    config = {
-        "all_args": all_args,
-        "envs": envs,
-        "eval_envs": eval_envs,
-        "device": device,
-        "run_dir": run_dir,
-        "render_mode": render_mode
-    }
-
-    # run experiments
-    if all_args.env_name == "MultipleCombat":
-        if all_args.use_adversarial:
-            from runner.share_adversarial_jsbsim_runner import ShareAdversarialJSBSimRunner as Runner
-        else:
-            from runner.share_jsbsim_runner import ShareJSBSimRunner as Runner
-    else:
-        if all_args.use_selfplay:
-            if all_args.use_adversarial:
-                from runner.adversarial_jsbsim_runner import AdversarialJSBSimRunner as Runner
-            else:
-                from runner.selfplay_jsbsim_runner import SelfplayJSBSimRunner as Runner
-        else:
-            from runner.jsbsim_runner import JSBSimRunner as Runner
-    runner = Runner(config)
-    try:
-        runner.run()
-    except BaseException:
-        traceback.print_exc()
-    finally:
-        # post process
-        envs.close()
-
-        if all_args.use_wandb:
-            run.finish()
+    env.close()
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
-    main(sys.argv[1:])
+    main()
