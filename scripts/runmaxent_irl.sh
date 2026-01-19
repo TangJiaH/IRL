@@ -8,8 +8,9 @@ sample_episodes=50
 max_steps=150
 learning_rate=0.05
 epochs=100
+seed=42
 
-echo "expert_path=${expert_path}, env_config=${env_config}, sample_episodes=${sample_episodes}, max_steps=${max_steps}, learning_rate=${learning_rate}, epochs=${epochs}"
+echo "expert_path=${expert_path}, env_config=${env_config}, sample_episodes=${sample_episodes}, max_steps=${max_steps}, learning_rate=${learning_rate}, epochs=${epochs}, seed=${seed}"
 
 cd "${root_dir}"
 python -m scripts.train.train_maxent_irl \
@@ -18,4 +19,5 @@ python -m scripts.train.train_maxent_irl \
     --sample-episodes "${sample_episodes}" \
     --max-steps "${max_steps}" \
     --learning-rate "${learning_rate}" \
-    --epochs "${epochs}"
+    --epochs "${epochs}" \
+    --seed "${seed}"
