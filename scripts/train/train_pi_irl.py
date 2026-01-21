@@ -7,6 +7,7 @@ import yaml
 
 from algorithms.irl.maxent_irl import RewardScales, load_acmi_trajectories, sample_env_trajectories
 from algorithms.irl.path_integral_irl import PathIntegralIRL
+from algorithms.irl.path_integral_irl_nn import PathIntegralIRLWithDeepLearning
 from envs.JSBSim.envs import SingleControlEnv
 from envs.JSBSim.utils.utils import get_root_dir
 
@@ -63,6 +64,14 @@ def parse_args() -> argparse.Namespace:
                         help="多次训练并集成的次数。")
     parser.add_argument("--ensemble-seed-offset", type=int, default=1000,
                         help="集成训练的随机种子偏移量。")
+    parser.add_argument("--use-reward-network", action="store_true",
+                        help="使用神经网络奖励函数（需要安装 PyTorch）。")
+    parser.add_argument("--reward-hidden-sizes", type=int, nargs="*", default=[32, 32],
+                        help="奖励网络隐藏层大小列表。")
+    parser.add_argument("--reward-lr", type=float, default=0.001,
+                        help="奖励网络优化器学习率。")
+    parser.add_argument("--grad-clip", type=float, default=1.0,
+                        help="奖励网络梯度裁剪阈值。")
     parser.add_argument("--write-config", action="store_true",
                         help="将学习到的权重写回 JSBSim 配置文件。")
     parser.add_argument("--output-json", type=str, default=None,
@@ -97,37 +106,73 @@ def main() -> None:
     if replay_batch_size is None:
         replay_batch_size = max(1, min(len(sampled_trajectories), args.sample_episodes))
 
-    irl = PathIntegralIRL(
-        learning_rate=args.learning_rate,
-        epochs=args.epochs,
-        temperature=args.temperature,
-        l2_reg=args.l2_reg,
-        normalize_returns=args.normalize_returns,
-        uniform_mix=args.uniform_mix,
-        resample_count=resample_count,
-        seed=args.seed,
-        replay_buffer_size=replay_buffer_size,
-        replay_batch_size=replay_batch_size,
-        temperature_decay=args.temperature_decay,
-        min_temperature=args.min_temperature,
-        optimizer=args.optimizer,
-        lr_decay=args.lr_decay,
-        adam_beta1=args.adam_beta1,
-        adam_beta2=args.adam_beta2,
-        adam_eps=args.adam_eps,
-        ensemble_runs=args.ensemble_runs,
-        ensemble_seed_offset=args.ensemble_seed_offset,
-    )
-    result = irl.fit(expert_trajectories, sampled_trajectories)
+    if args.use_reward_network:
+        import torch
 
-    weights = result["weights"].tolist()
-    print("PI-IRL 权重:", weights)
+        def _build_reward_network(input_dim: int):
+            layers = []
+            in_dim = input_dim
+            for hidden_dim in args.reward_hidden_sizes:
+                layers.append(torch.nn.Linear(in_dim, hidden_dim))
+                layers.append(torch.nn.ReLU())
+                in_dim = hidden_dim
+            layers.append(torch.nn.Linear(in_dim, 1))
+            return torch.nn.Sequential(*layers)
 
-    if args.output_json:
+        reward_network = _build_reward_network(expert_trajectories[0].shape[-1])
+        irl = PathIntegralIRLWithDeepLearning(
+            reward_network=reward_network,
+            learning_rate=args.reward_lr,
+            epochs=args.epochs,
+            temperature=args.temperature,
+            l2_reg=args.l2_reg,
+            normalize_returns=args.normalize_returns,
+            uniform_mix=args.uniform_mix,
+            resample_count=resample_count,
+            seed=args.seed,
+            replay_buffer_size=replay_buffer_size,
+            replay_batch_size=replay_batch_size,
+            temperature_decay=args.temperature_decay,
+            min_temperature=args.min_temperature,
+            grad_clip=args.grad_clip,
+        )
+        result = irl.fit(expert_trajectories, sampled_trajectories)
+        weights = None
+    else:
+        irl = PathIntegralIRL(
+            learning_rate=args.learning_rate,
+            epochs=args.epochs,
+            temperature=args.temperature,
+            l2_reg=args.l2_reg,
+            normalize_returns=args.normalize_returns,
+            uniform_mix=args.uniform_mix,
+            resample_count=resample_count,
+            seed=args.seed,
+            replay_buffer_size=replay_buffer_size,
+            replay_batch_size=replay_batch_size,
+            temperature_decay=args.temperature_decay,
+            min_temperature=args.min_temperature,
+            optimizer=args.optimizer,
+            lr_decay=args.lr_decay,
+            adam_beta1=args.adam_beta1,
+            adam_beta2=args.adam_beta2,
+            adam_eps=args.adam_eps,
+            ensemble_runs=args.ensemble_runs,
+            ensemble_seed_offset=args.ensemble_seed_offset,
+        )
+        result = irl.fit(expert_trajectories, sampled_trajectories)
+        weights = result["weights"].tolist()
+
+    if weights is not None:
+        print("PI-IRL 权重:", weights)
+    else:
+        print("PI-IRL 已完成奖励网络训练。")
+
+    if args.output_json and weights is not None:
         output_path = Path(args.output_json)
         output_path.write_text(json.dumps({"HeadingReward_weights": weights}, indent=2), encoding="utf-8")
 
-    if args.write_config:
+    if args.write_config and weights is not None:
         config_path = Path(get_root_dir()) / "configs" / f"{args.env_config}.yaml"
         config_data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
         config_data["HeadingReward_weights"] = weights
