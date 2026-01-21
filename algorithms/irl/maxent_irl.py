@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence, Tuple
 
+import io
+
 import numpy as np
 
 from envs.JSBSim.core.catalog import Catalog as c
@@ -68,50 +70,59 @@ def _trajectory_feature_sums(trajectories: Sequence[np.ndarray]) -> np.ndarray:
     return np.array([traj.sum(axis=0) for traj in trajectories], dtype=float)
 
 
+def _read_text_lines(path: Path) -> List[str]:
+    data = path.read_bytes()
+    for encoding in ("utf-8-sig", "utf-8", "gbk", "cp1252", "latin-1"):
+        try:
+            return data.decode(encoding).splitlines()
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", errors="ignore").splitlines()
+
+
 def parse_acmi_file(path: Path) -> List[Tuple[float, float, float, float, Optional[float], Optional[float]]]:
     states = []
     current_time = 0.0
-    with path.open("r", encoding="utf-8") as f:
-        for raw_line in f:
-            line = raw_line.strip().lstrip("\ufeff")
-            if not line:
-                continue
-            if line.startswith("#"):
-                current_time = float(line[1:])
-                continue
-            if "T=" not in line:
-                continue
-            payload = line.split("T=", 1)[1].split(",", 1)[0]
-            fields = payload.split("|")
-            if len(fields) < 3:
-                continue
-            lon = _safe_float(fields[0])
-            lat = _safe_float(fields[1])
-            alt = _safe_float(fields[2])
-            if lon is None or lat is None or alt is None:
-                continue
-            roll = _safe_float(fields[3]) if len(fields) > 3 else None
-            yaw = _safe_float(fields[5]) if len(fields) > 5 else None
-            states.append((current_time, lon, lat, alt, roll, yaw))
+    for raw_line in _read_text_lines(path):
+        line = raw_line.strip().lstrip("\ufeff")
+        if not line:
+            continue
+        if line.startswith("#"):
+            current_time = float(line[1:])
+            continue
+        if "T=" not in line:
+            continue
+        payload = line.split("T=", 1)[1].split(",", 1)[0]
+        fields = payload.split("|")
+        if len(fields) < 3:
+            continue
+        lon = _safe_float(fields[0])
+        lat = _safe_float(fields[1])
+        alt = _safe_float(fields[2])
+        if lon is None or lat is None or alt is None:
+            continue
+        roll = _safe_float(fields[3]) if len(fields) > 3 else None
+        yaw = _safe_float(fields[5]) if len(fields) > 5 else None
+        states.append((current_time, lon, lat, alt, roll, yaw))
     return states
 
 
 def parse_csv_file(path: Path) -> List[Tuple[float, float, float, float, Optional[float], Optional[float]]]:
     states = []
-    with path.open("r", encoding="utf-8", newline="") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            time_value = _safe_float(row.get("Unix time") or row.get("Time") or row.get("Timestamp"))
-            if time_value is None:
-                continue
-            lon = _safe_float(row.get("Longitude"))
-            lat = _safe_float(row.get("Latitude"))
-            alt = _safe_float(row.get("Altitude"))
-            if lon is None or lat is None or alt is None:
-                continue
-            roll = _safe_float(row.get("Roll"))
-            yaw = _safe_float(row.get("Yaw") or row.get("Heading"))
-            states.append((time_value, lon, lat, alt, roll, yaw))
+    csv_text = "\n".join(_read_text_lines(path))
+    reader = csv.DictReader(io.StringIO(csv_text, newline=""))
+    for row in reader:
+        time_value = _safe_float(row.get("Unix time") or row.get("Time") or row.get("Timestamp"))
+        if time_value is None:
+            continue
+        lon = _safe_float(row.get("Longitude"))
+        lat = _safe_float(row.get("Latitude"))
+        alt = _safe_float(row.get("Altitude"))
+        if lon is None or lat is None or alt is None:
+            continue
+        roll = _safe_float(row.get("Roll"))
+        yaw = _safe_float(row.get("Yaw") or row.get("Heading"))
+        states.append((time_value, lon, lat, alt, roll, yaw))
     return states
 
 
