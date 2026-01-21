@@ -24,6 +24,8 @@ def parse_args() -> argparse.Namespace:
                         help="MaxEnt IRL 学习率。")
     parser.add_argument("--epochs", type=int, default=50,
                         help="MaxEnt IRL 迭代轮数。")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="随机种子，用于采样随机轨迹。")
     parser.add_argument("--write-config", action="store_true",
                         help="将学习到的权重写回 JSBSim 配置文件。")
     parser.add_argument("--output-json", type=str, default=None,
@@ -41,7 +43,11 @@ def main() -> None:
 
     env = SingleControlEnv(args.env_config)
     sampled_trajectories = sample_env_trajectories(
-        env, num_episodes=args.sample_episodes, max_steps=args.max_steps, scales=scales
+        env,
+        num_episodes=args.sample_episodes,
+        max_steps=args.max_steps,
+        scales=scales,
+        seed=args.seed,
     )
     if not sampled_trajectories:
         raise ValueError("未采样到随机轨迹，无法进行 MaxEnt IRL。")
