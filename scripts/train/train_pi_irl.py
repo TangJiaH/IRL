@@ -27,8 +27,24 @@ def parse_args() -> argparse.Namespace:
                         help="PI-IRL 迭代轮数。")
     parser.add_argument("--temperature", type=float, default=1.0,
                         help="Path Integral 温度系数。")
-    parser.add_argument("--l2-reg", type=float, default=0.0,
+    parser.add_argument("--l2-reg", type=float, default=0.01,
                         help="L2 正则系数。")
+    normalize_group = parser.add_mutually_exclusive_group()
+    normalize_group.add_argument("--normalize-returns", dest="normalize_returns", action="store_true",
+                                 help="对路径积分回报进行标准化以提升数值稳定性。")
+    normalize_group.add_argument("--no-normalize-returns", dest="normalize_returns", action="store_false",
+                                 help="禁用路径积分回报标准化。")
+    parser.set_defaults(normalize_returns=True)
+    parser.add_argument("--uniform-mix", type=float, default=0.05,
+                        help="与均匀分布混合的概率，用于稳定重要性采样。")
+    parser.add_argument("--resample-count", type=int, default=None,
+                        help="重要性采样重采样数量（用于降低蒙特卡洛估计方差）。")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="随机种子，用于采样与重要性重采样。")
+    parser.add_argument("--replay-buffer-size", type=int, default=None,
+                        help="轨迹回放缓冲区大小（用于平滑训练）。")
+    parser.add_argument("--replay-batch-size", type=int, default=None,
+                        help="每轮从回放缓冲区采样的轨迹数量。")
     parser.add_argument("--write-config", action="store_true",
                         help="将学习到的权重写回 JSBSim 配置文件。")
     parser.add_argument("--output-json", type=str, default=None,
@@ -51,11 +67,29 @@ def main() -> None:
     if not sampled_trajectories:
         raise ValueError("未采样到随机轨迹，无法进行 PI-IRL。")
 
+    resample_count = args.resample_count
+    if resample_count is None:
+        resample_count = max(1, args.sample_episodes)
+
+    replay_buffer_size = args.replay_buffer_size
+    if replay_buffer_size is None:
+        replay_buffer_size = max(1, len(sampled_trajectories))
+
+    replay_batch_size = args.replay_batch_size
+    if replay_batch_size is None:
+        replay_batch_size = max(1, min(len(sampled_trajectories), args.sample_episodes))
+
     irl = PathIntegralIRL(
         learning_rate=args.learning_rate,
         epochs=args.epochs,
         temperature=args.temperature,
         l2_reg=args.l2_reg,
+        normalize_returns=args.normalize_returns,
+        uniform_mix=args.uniform_mix,
+        resample_count=resample_count,
+        seed=args.seed,
+        replay_buffer_size=replay_buffer_size,
+        replay_batch_size=replay_batch_size,
     )
     result = irl.fit(expert_trajectories, sampled_trajectories)
 
