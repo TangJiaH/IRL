@@ -29,8 +29,12 @@ def parse_args() -> argparse.Namespace:
                         help="Path Integral 温度系数。")
     parser.add_argument("--l2-reg", type=float, default=0.01,
                         help="L2 正则系数。")
-    parser.add_argument("--normalize-returns", action=argparse.BooleanOptionalAction, default=True,
-                        help="对路径积分回报进行标准化以提升数值稳定性。")
+    normalize_group = parser.add_mutually_exclusive_group()
+    normalize_group.add_argument("--normalize-returns", dest="normalize_returns", action="store_true",
+                                 help="对路径积分回报进行标准化以提升数值稳定性。")
+    normalize_group.add_argument("--no-normalize-returns", dest="normalize_returns", action="store_false",
+                                 help="禁用路径积分回报标准化。")
+    parser.set_defaults(normalize_returns=True)
     parser.add_argument("--uniform-mix", type=float, default=0.05,
                         help="与均匀分布混合的概率，用于稳定重要性采样。")
     parser.add_argument("--resample-count", type=int, default=None,
