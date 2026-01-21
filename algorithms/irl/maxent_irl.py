@@ -141,7 +141,7 @@ def trajectory_log_features_from_acmi(path: Path, scales: Optional[RewardScales]
 
 def load_acmi_trajectories(path: str, scales: Optional[RewardScales] = None) -> List[np.ndarray]:
     base = Path(path)
-    files = [base] if base.is_file() else sorted(base.glob("*.acmi"))
+    files = [base] if base.is_file() else sorted(base.rglob("*.acmi"))
     trajectories = []
     for file_path in files:
         features = trajectory_log_features_from_acmi(file_path, scales=scales)
