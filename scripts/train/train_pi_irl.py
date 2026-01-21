@@ -17,7 +17,7 @@ def parse_args() -> argparse.Namespace:
                         help="专家轨迹数据集路径（目录或单个 .acmi 文件）。")
     parser.add_argument("--env-config", type=str, default="1/heading",
                         help="JSBSim 环境配置名（相对于 envs/JSBSim/configs）。")
-    parser.add_argument("--sample-episodes", type=int, default=10,
+    parser.add_argument("--sample-episodes", type=int, default=20,
                         help="用于估计模型期望的随机轨迹数量。")
     parser.add_argument("--max-steps", type=int, default=None,
                         help="采样轨迹最大步数，默认使用环境 max_steps。")
@@ -45,6 +45,24 @@ def parse_args() -> argparse.Namespace:
                         help="轨迹回放缓冲区大小（用于平滑训练）。")
     parser.add_argument("--replay-batch-size", type=int, default=None,
                         help="每轮从回放缓冲区采样的轨迹数量。")
+    parser.add_argument("--temperature-decay", type=float, default=0.98,
+                        help="温度系数衰减系数（每轮乘以该值）。")
+    parser.add_argument("--min-temperature", type=float, default=0.1,
+                        help="温度系数下限。")
+    parser.add_argument("--optimizer", type=str, default="adam", choices=("adam", "sgd"),
+                        help="优化器类型。")
+    parser.add_argument("--lr-decay", type=float, default=0.99,
+                        help="学习率衰减系数（每轮乘以该值）。")
+    parser.add_argument("--adam-beta1", type=float, default=0.9,
+                        help="Adam 一阶动量系数。")
+    parser.add_argument("--adam-beta2", type=float, default=0.999,
+                        help="Adam 二阶动量系数。")
+    parser.add_argument("--adam-eps", type=float, default=1e-8,
+                        help="Adam 数值稳定项。")
+    parser.add_argument("--ensemble-runs", type=int, default=3,
+                        help="多次训练并集成的次数。")
+    parser.add_argument("--ensemble-seed-offset", type=int, default=1000,
+                        help="集成训练的随机种子偏移量。")
     parser.add_argument("--write-config", action="store_true",
                         help="将学习到的权重写回 JSBSim 配置文件。")
     parser.add_argument("--output-json", type=str, default=None,
@@ -90,6 +108,15 @@ def main() -> None:
         seed=args.seed,
         replay_buffer_size=replay_buffer_size,
         replay_batch_size=replay_batch_size,
+        temperature_decay=args.temperature_decay,
+        min_temperature=args.min_temperature,
+        optimizer=args.optimizer,
+        lr_decay=args.lr_decay,
+        adam_beta1=args.adam_beta1,
+        adam_beta2=args.adam_beta2,
+        adam_eps=args.adam_eps,
+        ensemble_runs=args.ensemble_runs,
+        ensemble_seed_offset=args.ensemble_seed_offset,
     )
     result = irl.fit(expert_trajectories, sampled_trajectories)
 
