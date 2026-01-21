@@ -17,13 +17,13 @@ def parse_args() -> argparse.Namespace:
                         help="专家轨迹数据集路径（目录或单个 .acmi 文件）。")
     parser.add_argument("--env-config", type=str, default="1/heading",
                         help="JSBSim 环境配置名（相对于 envs/JSBSim/configs）。")
-    parser.add_argument("--sample-episodes", type=int, default=20,
+    parser.add_argument("--sample-episodes", type=int, default=50,
                         help="用于估计模型期望的随机轨迹数量。")
     parser.add_argument("--max-steps", type=int, default=None,
                         help="采样轨迹最大步数，默认使用环境 max_steps。")
     parser.add_argument("--learning-rate", type=float, default=0.1,
                         help="PI-IRL 学习率。")
-    parser.add_argument("--epochs", type=int, default=50,
+    parser.add_argument("--epochs", type=int, default=100,
                         help="PI-IRL 迭代轮数。")
     parser.add_argument("--temperature", type=float, default=1.0,
                         help="Path Integral 温度系数。")
@@ -59,7 +59,7 @@ def parse_args() -> argparse.Namespace:
                         help="Adam 二阶动量系数。")
     parser.add_argument("--adam-eps", type=float, default=1e-8,
                         help="Adam 数值稳定项。")
-    parser.add_argument("--ensemble-runs", type=int, default=3,
+    parser.add_argument("--ensemble-runs", type=int, default=5,
                         help="多次训练并集成的次数。")
     parser.add_argument("--ensemble-seed-offset", type=int, default=1000,
                         help="集成训练的随机种子偏移量。")
