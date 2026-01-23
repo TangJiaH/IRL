@@ -3,6 +3,7 @@ import argparse
 import json
 from pathlib import Path
 
+import numpy as np
 import yaml
 
 from algorithms.irl.maxent_irl import RewardScales, load_acmi_trajectories, sample_env_trajectories
@@ -72,6 +73,8 @@ def parse_args() -> argparse.Namespace:
                         help="奖励网络优化器学习率。")
     parser.add_argument("--grad-clip", type=float, default=1.0,
                         help="奖励网络梯度裁剪阈值。")
+    parser.add_argument("--distill-linear-weights", action="store_true",
+                        help="在奖励网络训练后蒸馏出线性权重（4 维）便于直接使用。")
     parser.add_argument("--write-config", action="store_true",
                         help="将学习到的权重写回 JSBSim 配置文件。")
     parser.add_argument("--output-json", type=str, default=None,
@@ -138,6 +141,16 @@ def main() -> None:
         )
         result = irl.fit(expert_trajectories, sampled_trajectories)
         weights = None
+        if args.distill_linear_weights:
+            all_features = np.concatenate([np.vstack(expert_trajectories), np.vstack(sampled_trajectories)], axis=0)
+            feature_tensor = torch.tensor(all_features, dtype=torch.float32)
+            with torch.no_grad():
+                rewards = reward_network(feature_tensor).squeeze(-1).cpu().numpy()
+            l2_reg = float(args.l2_reg)
+            xtx = all_features.T @ all_features
+            if l2_reg > 0:
+                xtx = xtx + l2_reg * np.eye(xtx.shape[0])
+            weights = np.linalg.solve(xtx, all_features.T @ rewards).tolist()
     else:
         irl = PathIntegralIRL(
             learning_rate=args.learning_rate,
