@@ -25,6 +25,19 @@ SingleControl env includes single agent heading task, whose goal is to train age
 
 The red is manever_agent, flying in a triangular trajectory. The blue is pursue agent, constantly tracking the red agent. You can reproduce this by `python envs/JSBSim/test/test_baseline_use_env.py`.
 
+#### Behavior Cloning (BC) pretraining for SingleControl
+You can pretrain a SingleControl policy from Tacview trajectories (e.g., `tacviewDataSet/`) using behavior cloning, then continue RL fine-tuning by pointing `--model-dir` to the BC checkpoint directory.
+
+```bash
+python scripts/train/train_bc_singlecontrol.py \
+  --expert-path tacviewDataSet \
+  --output-dir runs/bc_pretrain
+
+# RL fine-tuning with PPO using the BC-initialized actor weights:
+python scripts/train/train_heading.py \
+  --model-dir runs/bc_pretrain
+```
+
 
 ### SingleCombat
 SingleCombat env is for two agents 1v1 competitive tasks, including NoWeapon tasks and Missile tasks. We provide self-play setting and vs-baseline setting for each task. Due to the fact that learning to fly and combat simultaneously is non-trival, we also provide a hierarchical framework, where the upper level control gives the direction, altitude and velocity, the low level control use the model trained in SingleControl. 
