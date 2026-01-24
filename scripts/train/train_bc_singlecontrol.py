@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader
 from algorithms.bc.tacview_bc_dataset import TacviewBCConfig, TacviewBCDataset
 from algorithms.ppo.ppo_policy import PPOPolicy
 from config import get_config
+from envs.JSBSim.envs import SingleControlEnv
 
 
 def parse_args() -> argparse.Namespace:
@@ -36,7 +37,107 @@ def parse_args() -> argparse.Namespace:
                         help="Sample stride for trajectory steps.")
     parser.add_argument("--max-samples", type=int, default=None,
                         help="Optional cap for total samples.")
+    parser.add_argument("--dagger-iterations", type=int, default=0,
+                        help="Number of DAgger aggregation iterations.")
+    parser.add_argument("--dagger-episodes", type=int, default=4,
+                        help="Episodes per DAgger iteration.")
+    parser.add_argument("--dagger-max-steps", type=int, default=300,
+                        help="Max steps per DAgger rollout.")
+    parser.add_argument("--dagger-env-config", type=str, default="1/heading",
+                        help="SingleControl env config for DAgger rollouts.")
     return parser.parse_args()
+
+
+def _discretize(value: float, nvec: int, low: float, high: float) -> int:
+    value = max(min(value, high), low)
+    scaled = (value - low) / (high - low)
+    return int(np.clip(round(scaled * (nvec - 1)), 0, nvec - 1))
+
+
+def _wrap_angle_rad(angle: float) -> float:
+    return (angle + np.pi) % (2 * np.pi) - np.pi
+
+
+def _label_from_transition(obs: np.ndarray, next_obs: np.ndarray, dt: float, config: TacviewBCConfig) -> np.ndarray:
+    roll = np.arctan2(obs[4], obs[5])
+    pitch = np.arctan2(obs[6], obs[7])
+    roll_next = np.arctan2(next_obs[4], next_obs[5])
+    pitch_next = np.arctan2(next_obs[6], next_obs[7])
+
+    roll_rate = _wrap_angle_rad(roll_next - roll) / dt
+    pitch_rate = _wrap_angle_rad(pitch_next - pitch) / dt
+    yaw_rate = _wrap_angle_rad(next_obs[1] - obs[1]) / dt
+
+    speed = obs[11] * 340.0
+    speed_next = next_obs[11] * 340.0
+    speed_rate = (speed_next - speed) / dt
+
+    aileron_cmd = np.clip(roll_rate / config.roll_rate_limit, -1.0, 1.0)
+    elevator_cmd = np.clip(pitch_rate / config.pitch_rate_limit, -1.0, 1.0)
+    rudder_cmd = np.clip(yaw_rate / config.yaw_rate_limit, -1.0, 1.0)
+    throttle_cmd = np.clip(0.65 + (speed_rate / config.speed_rate_limit) * 0.25, 0.4, 0.9)
+
+    return np.array([
+        _discretize(aileron_cmd, 41, -1.0, 1.0),
+        _discretize(elevator_cmd, 41, -1.0, 1.0),
+        _discretize(rudder_cmd, 41, -1.0, 1.0),
+        _discretize(throttle_cmd, 30, 0.4, 0.9),
+    ], dtype=np.int64)
+
+
+def _collect_dagger_samples(policy: PPOPolicy, env: SingleControlEnv, episodes: int, max_steps: int,
+                            config: TacviewBCConfig, device: torch.device) -> tuple[np.ndarray, np.ndarray]:
+    obs_list = []
+    act_list = []
+    for _ in range(episodes):
+        obs = env.reset()
+        rnn_states = np.zeros((obs.shape[0], policy.actor.recurrent_hidden_layers, policy.actor.recurrent_hidden_size))
+        masks = np.ones((env.num_agents, 1), dtype=np.float32)
+        for _ in range(max_steps):
+            obs_tensor = torch.from_numpy(obs).to(device)
+            rnn_tensor = torch.from_numpy(rnn_states).to(device)
+            masks_tensor = torch.from_numpy(masks).to(device)
+            with torch.no_grad():
+                actions, _, rnn_tensor = policy.actor(obs_tensor, rnn_tensor, masks_tensor, deterministic=True)
+            action_np = actions.cpu().numpy()
+            next_obs, _, dones, _ = env.step(action_np)
+            dt = config.min_dt
+            for agent_idx in range(obs.shape[0]):
+                label = _label_from_transition(obs[agent_idx], next_obs[agent_idx], dt, config)
+                obs_list.append(obs[agent_idx])
+                act_list.append(label)
+            obs = next_obs
+            rnn_states = rnn_tensor.cpu().numpy()
+            if dones.any():
+                break
+    if not obs_list:
+        return np.empty((0, 12), dtype=np.float32), np.empty((0, 4), dtype=np.int64)
+    return np.stack(obs_list, axis=0), np.stack(act_list, axis=0)
+
+
+def _train_bc_epoch(policy: PPOPolicy, dataloader: DataLoader, optimizer: torch.optim.Optimizer,
+                    device: torch.device, args: argparse.Namespace) -> float:
+    total_loss = 0.0
+    total_samples = 0
+    for obs_batch, action_batch in dataloader:
+        obs_batch = obs_batch.to(device)
+        action_batch = action_batch.to(device)
+        batch_size = obs_batch.shape[0]
+
+        rnn_states = torch.zeros((batch_size, args.recurrent_hidden_layers, args.recurrent_hidden_size), device=device)
+        masks = torch.ones((batch_size, 1), device=device)
+
+        action_log_probs, _ = policy.actor.evaluate_actions(obs_batch, rnn_states, action_batch, masks)
+        loss = -action_log_probs.mean()
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        total_loss += loss.item() * batch_size
+        total_samples += batch_size
+
+    return total_loss / max(total_samples, 1)
 
 
 def main() -> None:
@@ -55,8 +156,6 @@ def main() -> None:
     if len(dataset) == 0:
         raise ValueError(f"No training samples found in {args.expert_path}")
 
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)
-
     obs_space = gym.spaces.Box(low=-10.0, high=10.0, shape=(12,))
     act_space = gym.spaces.MultiDiscrete([41, 41, 41, 30])
 
@@ -64,29 +163,22 @@ def main() -> None:
     policy.actor.train()
     optimizer = torch.optim.Adam(policy.actor.parameters(), lr=args.bc_lr)
 
-    for epoch in range(args.epochs):
-        total_loss = 0.0
-        total_samples = 0
-        for obs_batch, action_batch in dataloader:
-            obs_batch = obs_batch.to(device)
-            action_batch = action_batch.to(device)
-            batch_size = obs_batch.shape[0]
+    env = None
+    if args.dagger_iterations > 0:
+        env = SingleControlEnv(args.dagger_env_config)
 
-            rnn_states = torch.zeros((batch_size, args.recurrent_hidden_layers, args.recurrent_hidden_size), device=device)
-            masks = torch.ones((batch_size, 1), device=device)
+    for iteration in range(args.dagger_iterations + 1):
+        dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)
+        for epoch in range(args.epochs):
+            avg_loss = _train_bc_epoch(policy, dataloader, optimizer, device, args)
+            print(f"Iter {iteration + 1}/{args.dagger_iterations + 1} Epoch {epoch + 1}/{args.epochs} - BC loss: {avg_loss:.6f}")
 
-            action_log_probs, _ = policy.actor.evaluate_actions(obs_batch, rnn_states, action_batch, masks)
-            loss = -action_log_probs.mean()
-
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            total_loss += loss.item() * batch_size
-            total_samples += batch_size
-
-        avg_loss = total_loss / max(total_samples, 1)
-        print(f"Epoch {epoch + 1}/{args.epochs} - BC loss: {avg_loss:.6f}")
+        if iteration < args.dagger_iterations:
+            obs_new, actions_new = _collect_dagger_samples(
+                policy, env, args.dagger_episodes, args.dagger_max_steps, config, device
+            )
+            dataset.add_samples(obs_new, actions_new)
+            print(f"DAgger aggregation: added {len(obs_new)} samples, total {len(dataset)}.")
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)

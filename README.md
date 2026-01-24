@@ -38,6 +38,18 @@ python scripts/train/train_heading.py \
   --model-dir runs/bc_pretrain
 ```
 
+#### Experiment groups (6)
+We provide six experiment scripts for SingleControl that cover RL-from-scratch, BC-only, BC+RL (with/without regularization), and DAgger-style data aggregation:
+
+```bash
+bash scripts/experiments/group1_rl_from_scratch.sh
+bash scripts/experiments/group2_bc_only.sh
+bash scripts/experiments/group3_bc_rl_unconstrained.sh
+bash scripts/experiments/group4_bc_rl_regularized.sh
+bash scripts/experiments/group5_dagger_bc_only.sh
+bash scripts/experiments/group6_dagger_bc_rl_regularized.sh
+```
+
 
 ### SingleCombat
 SingleCombat env is for two agents 1v1 competitive tasks, including NoWeapon tasks and Missile tasks. We provide self-play setting and vs-baseline setting for each task. Due to the fact that learning to fly and combat simultaneously is non-trival, we also provide a hierarchical framework, where the upper level control gives the direction, altitude and velocity, the low level control use the model trained in SingleControl. 

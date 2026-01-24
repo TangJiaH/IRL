@@ -245,3 +245,15 @@ class TacviewBCDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
         return torch.from_numpy(self.obs[idx]), torch.from_numpy(self.actions[idx])
+
+    def add_samples(self, obs: np.ndarray, actions: np.ndarray) -> None:
+        if obs.size == 0 or actions.size == 0:
+            return
+        obs = np.asarray(obs, dtype=np.float32)
+        actions = np.asarray(actions, dtype=np.int64)
+        if self.obs.size == 0:
+            self.obs = obs
+            self.actions = actions
+        else:
+            self.obs = np.concatenate([self.obs, obs], axis=0)
+            self.actions = np.concatenate([self.actions, actions], axis=0)
