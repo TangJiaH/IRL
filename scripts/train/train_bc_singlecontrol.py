@@ -16,35 +16,35 @@ from envs.JSBSim.envs import SingleControlEnv
 def parse_args() -> argparse.Namespace:
     parser = get_config()
     parser.add_argument("--expert-path", type=str, default="tacviewDataSet",
-                        help="Tacview expert data path (directory or file).")
+                        help="Tacview 专家数据路径（目录或单个文件）。")
     parser.add_argument("--output-dir", type=str, default="runs/bc_pretrain",
-                        help="Directory to save actor_latest.pt and critic_latest.pt.")
+                        help="保存 actor_latest.pt 与 critic_latest.pt 的目录。")
     parser.add_argument("--epochs", type=int, default=10,
-                        help="Behavior cloning epochs.")
+                        help="行为克隆训练轮数。")
     parser.add_argument("--batch-size", type=int, default=256,
-                        help="Behavior cloning batch size.")
+                        help="行为克隆批大小。")
     parser.add_argument("--bc-lr", type=float, default=1e-3,
-                        help="Behavior cloning learning rate.")
+                        help="行为克隆学习率。")
     parser.add_argument("--roll-rate-limit", type=float, default=1.2,
-                        help="Roll rate normalization (rad/s).")
+                        help="滚转角速度归一化上限（rad/s）。")
     parser.add_argument("--pitch-rate-limit", type=float, default=0.8,
-                        help="Pitch rate normalization (rad/s).")
+                        help="俯仰角速度归一化上限（rad/s）。")
     parser.add_argument("--yaw-rate-limit", type=float, default=0.8,
-                        help="Yaw rate normalization (rad/s).")
+                        help="偏航角速度归一化上限（rad/s）。")
     parser.add_argument("--speed-rate-limit", type=float, default=15.0,
-                        help="Speed change normalization (m/s^2).")
+                        help="速度变化率归一化上限（m/s^2）。")
     parser.add_argument("--stride", type=int, default=1,
-                        help="Sample stride for trajectory steps.")
+                        help="轨迹采样步长。")
     parser.add_argument("--max-samples", type=int, default=None,
-                        help="Optional cap for total samples.")
+                        help="可选的样本数量上限。")
     parser.add_argument("--dagger-iterations", type=int, default=0,
-                        help="Number of DAgger aggregation iterations.")
+                        help="DAgger 聚合迭代次数。")
     parser.add_argument("--dagger-episodes", type=int, default=4,
-                        help="Episodes per DAgger iteration.")
+                        help="每次 DAgger 迭代的采样回合数。")
     parser.add_argument("--dagger-max-steps", type=int, default=300,
-                        help="Max steps per DAgger rollout.")
+                        help="每回合 DAgger 采样的最大步数。")
     parser.add_argument("--dagger-env-config", type=str, default="1/heading",
-                        help="SingleControl env config for DAgger rollouts.")
+                        help="DAgger 采样使用的 SingleControl 配置名。")
     return parser.parse_args()
 
 
@@ -171,22 +171,22 @@ def main() -> None:
         dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)
         for epoch in range(args.epochs):
             avg_loss = _train_bc_epoch(policy, dataloader, optimizer, device, args)
-            print(f"Iter {iteration + 1}/{args.dagger_iterations + 1} Epoch {epoch + 1}/{args.epochs} - BC loss: {avg_loss:.6f}")
+            print(f"迭代 {iteration + 1}/{args.dagger_iterations + 1} 轮次 {epoch + 1}/{args.epochs} - BC 损失: {avg_loss:.6f}")
 
         if iteration < args.dagger_iterations:
             obs_new, actions_new = _collect_dagger_samples(
                 policy, env, args.dagger_episodes, args.dagger_max_steps, config, device
             )
             dataset.add_samples(obs_new, actions_new)
-            print(f"DAgger aggregation: added {len(obs_new)} samples, total {len(dataset)}.")
+            print(f"DAgger 聚合: 新增 {len(obs_new)} 条样本，总计 {len(dataset)}。")
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     torch.save(policy.actor.state_dict(), output_dir / "actor_latest.pt")
     torch.save(policy.critic.state_dict(), output_dir / "critic_latest.pt")
 
-    print(f"Saved BC actor to {output_dir / 'actor_latest.pt'}")
-    print(f"Saved BC critic to {output_dir / 'critic_latest.pt'}")
+    print(f"已保存 BC actor 至 {output_dir / 'actor_latest.pt'}")
+    print(f"已保存 BC critic 至 {output_dir / 'critic_latest.pt'}")
 
 
 if __name__ == "__main__":

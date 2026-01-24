@@ -57,13 +57,13 @@ def make_eval_env(all_args):
 def parse_args(args, parser):
     group = parser.add_argument_group("JSBSim Env parameters")
     group.add_argument('--episode-length', type=int, default=1000,
-                       help="the max length of an episode")
+                       help="单回合最大步数")
     group.add_argument('--scenario-name', type=str, default='1/heading',
-                       help="JSBSim config name under envs/JSBSim/configs")
+                       help="JSBSim 配置名（位于 envs/JSBSim/configs）")
     group.add_argument('--num-agents', type=int, default=1,
-                       help="number of fighters controlled by RL policy")
+                       help="由 RL 控制的智能体数量")
     group.add_argument('--render-mode', type=str, default='txt',
-                       help="txt or real_time")
+                       help="渲染模式：txt 或 real_time")
     all_args = parser.parse_known_args(args)[0]
     return all_args
 

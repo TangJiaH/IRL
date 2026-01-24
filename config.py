@@ -213,11 +213,11 @@ def _get_ppo_config(parser: argparse.ArgumentParser):
     group.add_argument("--max-grad-norm", type=float, default=2,
                        help='max norm of gradients (default: 2)')
     group.add_argument("--bc-regularization", action='store_true', default=False,
-                       help="Enable BC policy regularization during PPO fine-tuning.")
+                       help="在 PPO 精调时启用 BC 正则。")
     group.add_argument("--bc-model-dir", type=str, default=None,
-                       help="Path to BC model directory containing actor_latest.pt.")
+                       help="包含 actor_latest.pt 的 BC 模型目录。")
     group.add_argument("--bc-coef", type=float, default=0.1,
-                       help="BC regularization coefficient.")
+                       help="BC 正则系数。")
     return parser
 
 

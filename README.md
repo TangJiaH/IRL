@@ -25,21 +25,21 @@ SingleControl env includes single agent heading task, whose goal is to train age
 
 The red is manever_agent, flying in a triangular trajectory. The blue is pursue agent, constantly tracking the red agent. You can reproduce this by `python envs/JSBSim/test/test_baseline_use_env.py`.
 
-#### Behavior Cloning (BC) pretraining for SingleControl
-You can pretrain a SingleControl policy from Tacview trajectories (e.g., `tacviewDataSet/`) using behavior cloning, then continue RL fine-tuning by pointing `--model-dir` to the BC checkpoint directory.
+#### 单机控制的行为克隆（BC）预训练
+你可以使用 Tacview 轨迹（例如 `tacviewDataSet/`）进行 BC 预训练，然后在 PPO 精调时将 `--model-dir` 指向 BC 输出目录。
 
 ```bash
 python scripts/train/train_bc_singlecontrol.py \
   --expert-path tacviewDataSet \
   --output-dir runs/bc_pretrain
 
-# RL fine-tuning with PPO using the BC-initialized actor weights:
+# 使用 BC 初始化权重进行 PPO 精调：
 python scripts/train/train_heading.py \
   --model-dir runs/bc_pretrain
 ```
 
-#### Experiment groups (6)
-We provide six experiment scripts for SingleControl that cover RL-from-scratch, BC-only, BC+RL (with/without regularization), and DAgger-style data aggregation:
+#### 实验分组（6 组）
+我们为 SingleControl 提供了 6 组实验脚本，覆盖 RL-from-scratch、BC-only、BC+RL（有/无正则）以及 DAgger 风格的数据聚合：
 
 ```bash
 bash scripts/experiments/group1_rl_from_scratch.sh
