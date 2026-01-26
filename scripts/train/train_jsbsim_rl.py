@@ -2,6 +2,7 @@
 import sys
 import os
 import torch
+import wandb
 import random
 import logging
 import numpy as np
@@ -93,17 +94,27 @@ def main(args):
     if not run_dir.exists():
         os.makedirs(str(run_dir))
 
-    if not run_dir.exists():
-        curr_run = 'run1'
+    if all_args.use_wandb:
+        run = wandb.init(config=all_args,
+                         project=all_args.env_name,
+                         notes=all_args.scenario_name,
+                         name=f"{all_args.experiment_name}_seed{all_args.seed}",
+                         group=all_args.scenario_name,
+                         dir=str(run_dir),
+                         job_type="training",
+                         reinit=True)
     else:
-        exst_run_nums = [int(str(folder.name).split('run')[1]) for folder in run_dir.iterdir() if str(folder.name).startswith('run')]
-        if len(exst_run_nums) == 0:
+        if not run_dir.exists():
             curr_run = 'run1'
         else:
-            curr_run = 'run%i' % (max(exst_run_nums) + 1)
-    run_dir = run_dir / curr_run
-    if not run_dir.exists():
-        os.makedirs(str(run_dir))
+            exst_run_nums = [int(str(folder.name).split('run')[1]) for folder in run_dir.iterdir() if str(folder.name).startswith('run')]
+            if len(exst_run_nums) == 0:
+                curr_run = 'run1'
+            else:
+                curr_run = 'run%i' % (max(exst_run_nums) + 1)
+        run_dir = run_dir / curr_run
+        if not run_dir.exists():
+            os.makedirs(str(run_dir))
 
     setproctitle.setproctitle(str(all_args.algorithm_name) + "-" + str(all_args.env_name)
                               + "-" + str(all_args.experiment_name) + "@" + str(all_args.user_name))
@@ -133,6 +144,8 @@ def main(args):
     envs.close()
     if eval_envs is not None:
         eval_envs.close()
+    if all_args.use_wandb:
+        run.finish()
 
 
 if __name__ == "__main__":

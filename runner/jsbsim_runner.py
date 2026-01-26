@@ -107,6 +107,18 @@ class JSBSimRunner(Runner):
                         info = infos[env_idx] if env_idx < len(infos) else {}
                         termination_reason = "timeout" if info.get("current_step", 0) >= self.envs.envs[0].max_steps else "terminal"
                         success_flag = 1 if info.get("heading_turn_counts", 0) > 0 else 0
+                        if self.use_wandb:
+                            step_num = self.total_num_steps + (step + 1) * self.n_rollout_threads
+                            episode_logs = {
+                                "episode/return": float(episode_returns[env_idx]),
+                                "episode/length": int(episode_lengths[env_idx]),
+                                "episode/success": int(success_flag),
+                                "episode/termination_reason": termination_reason,
+                                "episode/action_change_count": int(action_change_counts[env_idx]),
+                                "episode/action_delta_sum": float(action_delta_sum[env_idx]),
+                                "episode/heading_turn_counts": float(info.get("heading_turn_counts", 0)),
+                            }
+                            self.log_info(episode_logs, step_num)
                         with open(train_log_path, "a", newline="", encoding="utf-8") as f:
                             writer = csv.writer(f)
                             writer.writerow([
