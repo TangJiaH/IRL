@@ -1,17 +1,17 @@
 import torch
 import torch.nn as nn
-from typing import Union, List
+from typing import Union, List, Optional
 from .ppo_policy import PPOPolicy
 from ..utils.buffer import ReplayBuffer
 from ..utils.utils import check, get_gard_norm
 
 
 class PPOTrainer:
-    def __init__(self, args, device=torch.device("cpu")):
+    def __init__(self, args, policy: Optional[PPOPolicy] = None, device=torch.device("cpu")):
 
         self.device = device
         self.tpdv = dict(dtype=torch.float32, device=device)
-        # ppo config
+        # PPO 配置
         self.ppo_epoch = args.ppo_epoch
         self.clip_param = args.clip_param
         self.use_clipped_value_loss = args.use_clipped_value_loss
@@ -20,9 +20,19 @@ class PPOTrainer:
         self.entropy_coef = args.entropy_coef
         self.use_max_grad_norm = args.use_max_grad_norm
         self.max_grad_norm = args.max_grad_norm
-        # rnn configs
+        # RNN 配置
         self.use_recurrent_policy = args.use_recurrent_policy
         self.data_chunk_length = args.data_chunk_length
+        self.bc_regularization = getattr(args, "bc_regularization", False)
+        self.bc_coef = getattr(args, "bc_coef", 0.0)
+        self.bc_policy = None
+        if self.bc_regularization and policy is not None:
+            bc_model_dir = getattr(args, "bc_model_dir", None)
+            if bc_model_dir:
+                self.bc_policy = policy.copy()
+                actor_state = torch.load(f"{bc_model_dir}/actor_latest.pt", map_location=device)
+                self.bc_policy.actor.load_state_dict(actor_state)
+                self.bc_policy.actor.eval()
 
     def ppo_update(self, policy: PPOPolicy, sample):
 
@@ -34,14 +44,14 @@ class PPOTrainer:
         returns_batch = check(returns_batch).to(**self.tpdv)
         value_preds_batch = check(value_preds_batch).to(**self.tpdv)
 
-        # Reshape to do in a single forward pass for all steps
+        # 统一形状以便一次前向计算所有步
         values, action_log_probs, dist_entropy = policy.evaluate_actions(obs_batch,
                                                                          rnn_states_actor_batch,
                                                                          rnn_states_critic_batch,
                                                                          actions_batch,
                                                                          masks_batch)
 
-        # Obtain the loss function
+        # 计算损失
         ratio = torch.exp(action_log_probs - old_action_log_probs_batch)
         surr1 = ratio * advantages_batch
         surr2 = torch.clamp(ratio, 1.0 - self.clip_param, 1.0 + self.clip_param) * advantages_batch
@@ -58,10 +68,19 @@ class PPOTrainer:
         value_loss = value_loss.mean()
 
         policy_entropy_loss = -dist_entropy.mean()
+        approx_kl = 0.5 * (action_log_probs - old_action_log_probs_batch).pow(2).mean()
+        clip_fraction = (torch.abs(ratio - 1.0) > self.clip_param).float().mean()
 
         loss = policy_loss + value_loss * self.value_loss_coef + policy_entropy_loss * self.entropy_coef
+        if self.bc_policy is not None and self.bc_coef > 0:
+            with torch.no_grad():
+                bc_action_log_probs, _ = self.bc_policy.actor.evaluate_actions(
+                    obs_batch, rnn_states_actor_batch, actions_batch, masks_batch
+                )
+            bc_kl = (action_log_probs - bc_action_log_probs).mean()
+            loss = loss + self.bc_coef * bc_kl
 
-        # Optimize the loss function
+        # 反向传播与优化
         policy.optimizer.zero_grad()
         loss.backward()
         if self.use_max_grad_norm:
@@ -72,7 +91,7 @@ class PPOTrainer:
             critic_grad_norm = get_gard_norm(policy.critic.parameters())
         policy.optimizer.step()
 
-        return policy_loss, value_loss, policy_entropy_loss, ratio, actor_grad_norm, critic_grad_norm
+        return policy_loss, value_loss, policy_entropy_loss, approx_kl, clip_fraction, ratio, actor_grad_norm, critic_grad_norm
 
     def train(self, policy: PPOPolicy, buffer: Union[ReplayBuffer, List[ReplayBuffer]]):
         train_info = {}
@@ -82,6 +101,8 @@ class PPOTrainer:
         train_info['actor_grad_norm'] = 0
         train_info['critic_grad_norm'] = 0
         train_info['ratio'] = 0
+        train_info['approx_kl'] = 0
+        train_info['clip_fraction'] = 0
 
         for _ in range(self.ppo_epoch):
             if self.use_recurrent_policy:
@@ -91,7 +112,7 @@ class PPOTrainer:
 
             for sample in data_generator:
 
-                policy_loss, value_loss, policy_entropy_loss, ratio, \
+                policy_loss, value_loss, policy_entropy_loss, approx_kl, clip_fraction, ratio, \
                     actor_grad_norm, critic_grad_norm = self.ppo_update(policy, sample)
 
                 train_info['value_loss'] += value_loss.item()
@@ -100,6 +121,8 @@ class PPOTrainer:
                 train_info['actor_grad_norm'] += actor_grad_norm
                 train_info['critic_grad_norm'] += critic_grad_norm
                 train_info['ratio'] += ratio.mean().item()
+                train_info['approx_kl'] += approx_kl.item()
+                train_info['clip_fraction'] += clip_fraction.item()
 
         num_updates = self.ppo_epoch * self.num_mini_batch
 
