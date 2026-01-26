@@ -50,7 +50,7 @@ class JSBSimRunner(Runner):
                 writer.writerow([
                     "episode",
                     "total_steps",
-                    "episode_return",
+                    "average_episode_rewards",
                     "episode_length",
                     "success_flag",
                     "termination_reason",
@@ -68,7 +68,6 @@ class JSBSimRunner(Runner):
 
             self.current_episode = episode
             heading_turns_list = []
-            episode_returns = np.zeros(self.n_rollout_threads, dtype=np.float32)
             episode_lengths = np.zeros(self.n_rollout_threads, dtype=np.int32)
             last_actions = None
             action_change_counts = np.zeros(self.n_rollout_threads, dtype=np.int32)
@@ -86,8 +85,6 @@ class JSBSimRunner(Runner):
                     if 'heading_turn_counts' in info:
                         heading_turns_list.append(info['heading_turn_counts'])
 
-                step_rewards = rewards.squeeze(-1).sum(axis=1)
-                episode_returns += step_rewards
                 episode_lengths += 1
                 if last_actions is not None:
                     action_change_counts += (actions != last_actions).any(axis=(1, 2))
@@ -110,7 +107,6 @@ class JSBSimRunner(Runner):
                         if self.use_wandb:
                             step_num = self.total_num_steps + (step + 1) * self.n_rollout_threads
                             episode_logs = {
-                                "episode/return": float(episode_returns[env_idx]),
                                 "episode/length": int(episode_lengths[env_idx]),
                                 "episode/success": int(success_flag),
                                 "episode/termination_reason": termination_reason,
@@ -124,7 +120,7 @@ class JSBSimRunner(Runner):
                             writer.writerow([
                                 episode,
                                 self.total_num_steps,
-                                float(episode_returns[env_idx]),
+                                "",
                                 int(episode_lengths[env_idx]),
                                 int(success_flag),
                                 termination_reason,
@@ -137,7 +133,6 @@ class JSBSimRunner(Runner):
                                 "",
                                 info.get("heading_turn_counts", ""),
                             ])
-                        episode_returns[env_idx] = 0.0
                         episode_lengths[env_idx] = 0
                         action_change_counts[env_idx] = 0
                         action_delta_sum[env_idx] = 0.0
@@ -174,7 +169,7 @@ class JSBSimRunner(Runner):
                     writer.writerow([
                         episode,
                         self.total_num_steps,
-                        "",
+                        train_infos.get("average_episode_rewards", ""),
                         "",
                         "",
                         "",
@@ -436,9 +431,9 @@ class JSBSimRunner(Runner):
         with open(train_log_path, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
-                if row.get("episode_return"):
+                if row.get("average_episode_rewards"):
                     episodes.append(int(row["episode"]))
-                    returns.append(float(row["episode_return"]))
+                    returns.append(float(row["average_episode_rewards"]))
                 if row.get("policy_loss"):
                     policy_losses.append(float(row["policy_loss"]))
                 if row.get("value_loss"):
@@ -450,9 +445,9 @@ class JSBSimRunner(Runner):
         os.makedirs(plot_dir, exist_ok=True)
         if returns:
             plt.figure()
-            plt.plot(episodes, returns, label="episode_return")
+            plt.plot(episodes, returns, label="average_episode_rewards")
             plt.xlabel("episode")
-            plt.ylabel("return")
+            plt.ylabel("average_episode_rewards")
             plt.legend()
             plt.tight_layout()
             plt.savefig(os.path.join(plot_dir, "train_return.png"))

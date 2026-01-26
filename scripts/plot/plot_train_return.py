@@ -25,11 +25,14 @@ def main() -> None:
     args = parser.parse_args()
 
     df = pd.read_csv(args.csv)
-    df = df[df["episode_return"].notna() & (df["episode_return"] != "")]
-    df["episode_return"] = df["episode_return"].astype(float)
+    reward_key = "average_episode_rewards"
+    if reward_key not in df.columns:
+        reward_key = "episode_return"
+    df = df[df[reward_key].notna() & (df[reward_key] != "")]
+    df[reward_key] = df[reward_key].astype(float)
 
     x = df["episode"] if "episode" in df.columns else range(len(df))
-    y = df["episode_return"]
+    y = df[reward_key]
 
     plt.figure(figsize=(10, 5))
     plt.plot(x, y, label="原始回报", alpha=0.4)
@@ -40,8 +43,8 @@ def main() -> None:
         plt.plot(x, smooth_ema(y, args.ema), label=f"EMA({args.ema})")
 
     plt.xlabel("episode")
-    plt.ylabel("episode_return")
-    plt.title("训练回报曲线")
+    plt.ylabel(reward_key)
+    plt.title(f"训练回报曲线({reward_key})")
     plt.legend()
     plt.tight_layout()
 
