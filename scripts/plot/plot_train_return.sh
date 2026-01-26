@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CSV_PATH=${1:-""}
-if [ -z "$CSV_PATH" ]; then
-  echo "用法: bash scripts/plot/plot_train_return.sh <train_metrics.csv路径> [window] [ema] [save_path]"
-  exit 1
-fi
+script_dir=$(cd "$(dirname "$0")" && pwd)
+root_dir=$(cd "${script_dir}/../.." && pwd)
 
-WINDOW=${2:-20}
-EMA=${3:-0.0}
-SAVE_PATH=${4:-""}
+csv_path="${root_dir}/results/SingleControl/1/heading/ppo/exp/run1/logs/train_metrics.csv"
+window=20
+ema=0.0
+save_path=""
 
-python scripts/plot/plot_train_return.py \
-  --csv "$CSV_PATH" \
-  --window "$WINDOW" \
-  --ema "$EMA" \
-  --save "$SAVE_PATH"
+echo "csv_path=${csv_path}, window=${window}, ema=${ema}, save_path=${save_path}"
+
+python "${root_dir}/scripts/plot/plot_train_return.py" \
+  --csv "${csv_path}" \
+  --window "${window}" \
+  --ema "${ema}" \
+  --save "${save_path}"
