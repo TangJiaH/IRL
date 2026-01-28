@@ -10,8 +10,10 @@ steps=1000
 dt=0.2
 seed=1
 target_interval=200
+env_config="1/heading"
+altitude_buffer=200.0
 
-echo "output_dir=${output_dir}, episodes=${episodes}, steps=${steps}, dt=${dt}, seed=${seed}, target_interval=${target_interval}"
+echo "output_dir=${output_dir}, episodes=${episodes}, steps=${steps}, dt=${dt}, seed=${seed}, target_interval=${target_interval}, env_config=${env_config}, altitude_buffer=${altitude_buffer}"
 
 python "${root_dir}/scripts/data/generate_rule_based_acmi.py" \
   --output-dir "${output_dir}" \
@@ -19,4 +21,6 @@ python "${root_dir}/scripts/data/generate_rule_based_acmi.py" \
   --steps "${steps}" \
   --dt "${dt}" \
   --seed "${seed}" \
-  --target-interval "${target_interval}"
+  --target-interval "${target_interval}" \
+  --env-config "${env_config}" \
+  --altitude-buffer "${altitude_buffer}"
