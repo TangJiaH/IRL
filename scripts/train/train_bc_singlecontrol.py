@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import argparse
 from pathlib import Path
+from typing import Tuple
 
 import gymnasium as gym
 import numpy as np
@@ -169,7 +170,7 @@ def _eval_bc_epoch(policy: PPOPolicy, dataloader: DataLoader,
 
 
 def _split_dataset(dataset: TacviewBCDataset, val_split: float, test_split: float,
-                   seed: int) -> tuple[torch.utils.data.Dataset, torch.utils.data.Dataset, torch.utils.data.Dataset]:
+                   seed: int) -> Tuple[torch.utils.data.Dataset, torch.utils.data.Dataset, torch.utils.data.Dataset]:
     if val_split < 0 or test_split < 0 or val_split + test_split >= 1:
         raise ValueError("val_split 和 test_split 必须在 [0,1) 且总和小于 1。")
     total_size = len(dataset)
