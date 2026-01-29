@@ -24,4 +24,4 @@ if [[ -n "${output_csv}" ]]; then
   args+=(--output-csv "${output_csv}")
 fi
 
-python "${ROOT_DIR}/scripts/eval/evaluate_jsbsim_policy.py" "${args[@]}"
+PYTHONPATH="${ROOT_DIR}" python "${ROOT_DIR}/scripts/eval/evaluate_jsbsim_policy.py" "${args[@]}"
