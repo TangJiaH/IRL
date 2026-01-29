@@ -6,6 +6,7 @@ import gymnasium as gym
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
+from torch.utils.data import random_split
 
 from algorithms.bc.tacview_bc_dataset import TacviewBCConfig, TacviewBCDataset
 from algorithms.ppo.ppo_policy import PPOPolicy
@@ -45,6 +46,10 @@ def parse_args() -> argparse.Namespace:
                         help="每回合 DAgger 采样的最大步数。")
     parser.add_argument("--dagger-env-config", type=str, default="1/heading",
                         help="DAgger 采样使用的 SingleControl 配置名。")
+    parser.add_argument("--val-split", type=float, default=0.1,
+                        help="验证集比例（0-1）。")
+    parser.add_argument("--test-split", type=float, default=0.1,
+                        help="评估集比例（0-1）。")
     return parser.parse_args()
 
 
@@ -140,6 +145,43 @@ def _train_bc_epoch(policy: PPOPolicy, dataloader: DataLoader, optimizer: torch.
     return total_loss / max(total_samples, 1)
 
 
+def _eval_bc_epoch(policy: PPOPolicy, dataloader: DataLoader,
+                   device: torch.device, args: argparse.Namespace) -> float:
+    total_loss = 0.0
+    total_samples = 0
+    policy.actor.eval()
+    with torch.no_grad():
+        for obs_batch, action_batch in dataloader:
+            obs_batch = obs_batch.to(device)
+            action_batch = action_batch.to(device)
+            batch_size = obs_batch.shape[0]
+
+            rnn_states = torch.zeros((batch_size, args.recurrent_hidden_layers, args.recurrent_hidden_size), device=device)
+            masks = torch.ones((batch_size, 1), device=device)
+
+            action_log_probs, _ = policy.actor.evaluate_actions(obs_batch, rnn_states, action_batch, masks)
+            loss = -action_log_probs.mean()
+
+            total_loss += loss.item() * batch_size
+            total_samples += batch_size
+    policy.actor.train()
+    return total_loss / max(total_samples, 1)
+
+
+def _split_dataset(dataset: TacviewBCDataset, val_split: float, test_split: float,
+                   seed: int) -> tuple[torch.utils.data.Dataset, torch.utils.data.Dataset, torch.utils.data.Dataset]:
+    if val_split < 0 or test_split < 0 or val_split + test_split >= 1:
+        raise ValueError("val_split 和 test_split 必须在 [0,1) 且总和小于 1。")
+    total_size = len(dataset)
+    val_size = int(total_size * val_split)
+    test_size = int(total_size * test_split)
+    train_size = total_size - val_size - test_size
+    if train_size <= 0:
+        raise ValueError("训练集样本数不足，请调整 val_split/test_split。")
+    generator = torch.Generator().manual_seed(seed)
+    return random_split(dataset, [train_size, val_size, test_size], generator=generator)
+
+
 def main() -> None:
     args = parse_args()
     device = torch.device("cuda" if args.cuda and torch.cuda.is_available() else "cpu")
@@ -155,6 +197,7 @@ def main() -> None:
     dataset = TacviewBCDataset(args.expert_path, config=config)
     if len(dataset) == 0:
         raise ValueError(f"No training samples found in {args.expert_path}")
+    train_set, val_set, test_set = _split_dataset(dataset, args.val_split, args.test_split, args.seed)
 
     obs_space = gym.spaces.Box(low=-10.0, high=10.0, shape=(12,))
     act_space = gym.spaces.MultiDiscrete([41, 41, 41, 30])
@@ -168,17 +211,29 @@ def main() -> None:
         env = SingleControlEnv(args.dagger_env_config)
 
     for iteration in range(args.dagger_iterations + 1):
-        dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)
+        dataloader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, drop_last=True)
+        val_loader = DataLoader(val_set, batch_size=args.batch_size, shuffle=False) if len(val_set) > 0 else None
         for epoch in range(args.epochs):
             avg_loss = _train_bc_epoch(policy, dataloader, optimizer, device, args)
-            print(f"迭代 {iteration + 1}/{args.dagger_iterations + 1} 轮次 {epoch + 1}/{args.epochs} - BC 损失: {avg_loss:.6f}")
+            if val_loader is not None:
+                val_loss = _eval_bc_epoch(policy, val_loader, device, args)
+                print(f"迭代 {iteration + 1}/{args.dagger_iterations + 1} 轮次 {epoch + 1}/{args.epochs} "
+                      f"- BC 损失: {avg_loss:.6f} - 验证损失: {val_loss:.6f}")
+            else:
+                print(f"迭代 {iteration + 1}/{args.dagger_iterations + 1} 轮次 {epoch + 1}/{args.epochs} - BC 损失: {avg_loss:.6f}")
 
         if iteration < args.dagger_iterations:
             obs_new, actions_new = _collect_dagger_samples(
                 policy, env, args.dagger_episodes, args.dagger_max_steps, config, device
             )
             dataset.add_samples(obs_new, actions_new)
+            train_set, val_set, test_set = _split_dataset(dataset, args.val_split, args.test_split, args.seed)
             print(f"DAgger 聚合: 新增 {len(obs_new)} 条样本，总计 {len(dataset)}。")
+
+    test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=False) if len(test_set) > 0 else None
+    if test_loader is not None:
+        test_loss = _eval_bc_epoch(policy, test_loader, device, args)
+        print(f"评估集 BC 损失: {test_loss:.6f}")
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)

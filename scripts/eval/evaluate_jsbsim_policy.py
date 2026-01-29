@@ -36,16 +36,30 @@ def make_eval_env(all_args):
 def parse_args(args: List[str]) -> argparse.Namespace:
     parser = get_config()
     group = parser.add_argument_group("Evaluation parameters")
-    group.add_argument("--model-dir", type=str, required=True,
-                       help="包含 actor_latest.pt 与 critic_latest.pt 的目录。")
-    group.add_argument("--env-name", type=str, default="SingleControl",
-                       help="环境名称（SingleControl/SingleCombat/MultipleCombat）。")
-    group.add_argument("--scenario-name", type=str, default="1/heading",
-                       help="JSBSim 配置名（位于 envs/JSBSim/configs）。")
+    if "--model-dir" in parser._option_string_actions:
+        parser._option_string_actions["--model-dir"].required = True
+        parser._option_string_actions["--model-dir"].help = "包含 actor_latest.pt 与 critic_latest.pt 的目录。"
+    else:
+        group.add_argument("--model-dir", type=str, required=True,
+                           help="包含 actor_latest.pt 与 critic_latest.pt 的目录。")
+    if "--env-name" in parser._option_string_actions:
+        parser._option_string_actions["--env-name"].default = "SingleControl"
+        parser._option_string_actions["--env-name"].help = "环境名称（SingleControl/SingleCombat/MultipleCombat）。"
+    else:
+        group.add_argument("--env-name", type=str, default="SingleControl",
+                           help="环境名称（SingleControl/SingleCombat/MultipleCombat）。")
+    if "--scenario-name" in parser._option_string_actions:
+        parser._option_string_actions["--scenario-name"].default = "1/heading"
+        parser._option_string_actions["--scenario-name"].help = "JSBSim 配置名（位于 envs/JSBSim/configs）。"
+    else:
+        group.add_argument("--scenario-name", type=str, default="1/heading",
+                           help="JSBSim 配置名（位于 envs/JSBSim/configs）。")
     group.add_argument("--episodes", type=int, default=20,
                        help="评估回合数。")
     group.add_argument("--max-steps", type=int, default=1000,
                        help="每回合最大步数。")
+    group.add_argument("--acmi-dir", type=str, default="",
+                       help="可选，评估轨迹 ACMI 输出目录，按回合生成文件。")
     group.add_argument("--output-csv", type=str, default="",
                        help="可选，评估结果输出 CSV。")
     return parser.parse_args(args)
@@ -98,6 +112,25 @@ def main(args: List[str]) -> None:
     delta_altitude_sq = np.zeros(all_args.n_eval_rollout_threads, dtype=np.float32)
     delta_speed_sq = np.zeros(all_args.n_eval_rollout_threads, dtype=np.float32)
 
+    acmi_enabled = bool(all_args.acmi_dir)
+    acmi_paths: List[str] = []
+    acmi_episode_counts: List[int] = []
+    if acmi_enabled:
+        os.makedirs(all_args.acmi_dir, exist_ok=True)
+        for env_idx in range(all_args.n_eval_rollout_threads):
+            acmi_episode_counts.append(1)
+            acmi_path = os.path.join(
+                all_args.acmi_dir, f"eval_env{env_idx}_episode{acmi_episode_counts[env_idx]}.txt.acmi"
+            )
+            acmi_paths.append(acmi_path)
+            eval_envs.envs[env_idx].render_with_tacview(
+                render_mode="histroy_acmi",
+                acmi_filename=acmi_path,
+                eval_env=eval_envs.envs[env_idx],
+                timestamp=0.0,
+                _should_save_acmi=True,
+            )
+
     while total_episodes < all_args.episodes:
         with torch.no_grad():
             eval_actions, eval_rnn_states = policy.act(
@@ -120,6 +153,14 @@ def main(args: List[str]) -> None:
             delta_heading_sq[env_idx] += delta_heading_rad ** 2
             delta_altitude_sq[env_idx] += delta_altitude_m ** 2
             delta_speed_sq[env_idx] += delta_speed_mps ** 2
+            if acmi_enabled:
+                eval_envs.envs[env_idx].render_with_tacview(
+                    render_mode="histroy_acmi",
+                    acmi_filename=acmi_paths[env_idx],
+                    eval_env=eval_envs.envs[env_idx],
+                    timestamp=float(episode_steps[env_idx]) * 0.2,
+                    _should_save_acmi=True,
+                )
 
         episode_reward += eval_rewards.squeeze(-1).sum(axis=1)
         episode_steps += 1
@@ -131,7 +172,7 @@ def main(args: List[str]) -> None:
             if not done_flag:
                 continue
             info = eval_infos[env_idx] if env_idx < len(eval_infos) else {}
-            success_flag = 1 if info.get("heading_turn_counts", 0) > 0 else 0
+            success_flag = 1 if force_done[env_idx] else 0
             length = int(min(episode_steps[env_idx], all_args.max_steps))
             episode_returns.append(float(episode_reward[env_idx]))
             episode_lengths.append(length)
@@ -148,6 +189,18 @@ def main(args: List[str]) -> None:
             delta_heading_sq[env_idx] = 0.0
             delta_altitude_sq[env_idx] = 0.0
             delta_speed_sq[env_idx] = 0.0
+            if acmi_enabled:
+                acmi_episode_counts[env_idx] += 1
+                acmi_paths[env_idx] = os.path.join(
+                    all_args.acmi_dir, f"eval_env{env_idx}_episode{acmi_episode_counts[env_idx]}.txt.acmi"
+                )
+                eval_envs.envs[env_idx].render_with_tacview(
+                    render_mode="histroy_acmi",
+                    acmi_filename=acmi_paths[env_idx],
+                    eval_env=eval_envs.envs[env_idx],
+                    timestamp=0.0,
+                    _should_save_acmi=True,
+                )
 
         eval_masks = np.ones_like(eval_masks, dtype=np.float32)
         eval_masks[eval_dones_env == True] = 0.0
