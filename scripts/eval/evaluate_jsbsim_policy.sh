@@ -11,6 +11,7 @@ scenario_name="1/heading"
 episodes=20
 max_steps=1000
 output_csv=""
+acmi_dir=""
 
 args=(
   --model-dir "${model_dir}"
@@ -22,6 +23,9 @@ args=(
 
 if [[ -n "${output_csv}" ]]; then
   args+=(--output-csv "${output_csv}")
+fi
+if [[ -n "${acmi_dir}" ]]; then
+  args+=(--acmi-dir "${acmi_dir}")
 fi
 
 PYTHONPATH="${ROOT_DIR}" python "${ROOT_DIR}/scripts/eval/evaluate_jsbsim_policy.py" "${args[@]}"
