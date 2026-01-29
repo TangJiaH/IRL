@@ -36,12 +36,24 @@ def make_eval_env(all_args):
 def parse_args(args: List[str]) -> argparse.Namespace:
     parser = get_config()
     group = parser.add_argument_group("Evaluation parameters")
-    group.add_argument("--model-dir", type=str, required=True,
-                       help="包含 actor_latest.pt 与 critic_latest.pt 的目录。")
-    group.add_argument("--env-name", type=str, default="SingleControl",
-                       help="环境名称（SingleControl/SingleCombat/MultipleCombat）。")
-    group.add_argument("--scenario-name", type=str, default="1/heading",
-                       help="JSBSim 配置名（位于 envs/JSBSim/configs）。")
+    if "--model-dir" in parser._option_string_actions:
+        parser._option_string_actions["--model-dir"].required = True
+        parser._option_string_actions["--model-dir"].help = "包含 actor_latest.pt 与 critic_latest.pt 的目录。"
+    else:
+        group.add_argument("--model-dir", type=str, required=True,
+                           help="包含 actor_latest.pt 与 critic_latest.pt 的目录。")
+    if "--env-name" in parser._option_string_actions:
+        parser._option_string_actions["--env-name"].default = "SingleControl"
+        parser._option_string_actions["--env-name"].help = "环境名称（SingleControl/SingleCombat/MultipleCombat）。"
+    else:
+        group.add_argument("--env-name", type=str, default="SingleControl",
+                           help="环境名称（SingleControl/SingleCombat/MultipleCombat）。")
+    if "--scenario-name" in parser._option_string_actions:
+        parser._option_string_actions["--scenario-name"].default = "1/heading"
+        parser._option_string_actions["--scenario-name"].help = "JSBSim 配置名（位于 envs/JSBSim/configs）。"
+    else:
+        group.add_argument("--scenario-name", type=str, default="1/heading",
+                           help="JSBSim 配置名（位于 envs/JSBSim/configs）。")
     group.add_argument("--episodes", type=int, default=20,
                        help="评估回合数。")
     group.add_argument("--max-steps", type=int, default=1000,
