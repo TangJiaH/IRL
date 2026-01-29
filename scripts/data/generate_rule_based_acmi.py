@@ -175,6 +175,13 @@ def main() -> None:
 
                 t = step * args.dt
                 f.write(f"#{t:.2f}\n")
+                if step % args.target_interval == 0:
+                    target_alt_m = target_alt_ft * 0.3048
+                    target_speed_mps = target_speed_ft_s * 0.3048
+                    f.write(
+                        f"//TARGET heading_deg={target_heading:.3f} "
+                        f"alt_m={target_alt_m:.2f} speed_mps={target_speed_mps:.2f}\n"
+                    )
                 f.write(
                     "A0100,"
                     f"T={lon:.6f}|{lat:.6f}|{altitude_ft * 0.3048:.2f}|{roll:.3f}|{pitch:.3f}|{heading:.3f},"
