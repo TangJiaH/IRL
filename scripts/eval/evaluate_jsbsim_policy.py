@@ -36,8 +36,12 @@ def make_eval_env(all_args):
 def parse_args(args: List[str]) -> argparse.Namespace:
     parser = get_config()
     group = parser.add_argument_group("Evaluation parameters")
-    group.add_argument("--model-dir", type=str, required=True,
-                       help="包含 actor_latest.pt 与 critic_latest.pt 的目录。")
+    if "--model-dir" in parser._option_string_actions:
+        parser._option_string_actions["--model-dir"].required = True
+        parser._option_string_actions["--model-dir"].help = "包含 actor_latest.pt 与 critic_latest.pt 的目录。"
+    else:
+        group.add_argument("--model-dir", type=str, required=True,
+                           help="包含 actor_latest.pt 与 critic_latest.pt 的目录。")
     group.add_argument("--env-name", type=str, default="SingleControl",
                        help="环境名称（SingleControl/SingleCombat/MultipleCombat）。")
     group.add_argument("--scenario-name", type=str, default="1/heading",
