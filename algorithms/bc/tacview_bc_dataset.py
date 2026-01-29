@@ -54,12 +54,44 @@ def _bearing_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return (math.degrees(math.atan2(x, y)) + 360.0) % 360.0
 
 
-def parse_acmi_file(path: Path) -> List[Tuple[float, float, float, float, float, float, float]]:
+def _parse_target_comment(line: str) -> Optional[Tuple[float, float, float]]:
+    if not line.startswith("//TARGET"):
+        return None
+    payload = line[len("//TARGET"):].strip()
+    if payload.startswith(":") or payload.startswith("="):
+        payload = payload[1:].strip()
+    tokens = payload.replace(",", " ").split()
+    values = {}
+    for token in tokens:
+        if "=" not in token:
+            continue
+        key, value = token.split("=", 1)
+        parsed = _safe_float(value)
+        if parsed is not None:
+            values[key.strip().lower()] = parsed
+    heading = values.get("heading_deg")
+    altitude = values.get("alt_m")
+    speed = values.get("speed_mps")
+    if heading is None or altitude is None or speed is None:
+        return None
+    return heading, altitude, speed
+
+
+def parse_acmi_file(
+    path: Path,
+) -> List[Tuple[float, float, float, float, float, float, float, Optional[float], Optional[float], Optional[float]]]:
     states = []
     current_time = 0.0
+    target_heading = None
+    target_alt_m = None
+    target_speed_mps = None
     for raw_line in _read_text_lines(path):
         line = raw_line.strip().lstrip("\ufeff")
         if not line:
+            continue
+        target_values = _parse_target_comment(line)
+        if target_values is not None:
+            target_heading, target_alt_m, target_speed_mps = target_values
             continue
         if line.startswith("#"):
             current_time = float(line[1:])
@@ -78,11 +110,26 @@ def parse_acmi_file(path: Path) -> List[Tuple[float, float, float, float, float,
         roll = _safe_float(fields[3]) if len(fields) > 3 else 0.0
         pitch = _safe_float(fields[4]) if len(fields) > 4 else 0.0
         yaw = _safe_float(fields[5]) if len(fields) > 5 else None
-        states.append((current_time, lon, lat, alt, roll or 0.0, pitch or 0.0, yaw or 0.0))
+        states.append(
+            (
+                current_time,
+                lon,
+                lat,
+                alt,
+                roll or 0.0,
+                pitch or 0.0,
+                yaw or 0.0,
+                target_heading,
+                target_alt_m,
+                target_speed_mps,
+            )
+        )
     return states
 
 
-def parse_csv_file(path: Path) -> List[Tuple[float, float, float, float, float, float, float]]:
+def parse_csv_file(
+    path: Path,
+) -> List[Tuple[float, float, float, float, float, float, float, Optional[float], Optional[float], Optional[float]]]:
     states = []
     csv_text = "\n".join(_read_text_lines(path))
     reader = csv.DictReader(io.StringIO(csv_text, newline=""))
@@ -98,7 +145,7 @@ def parse_csv_file(path: Path) -> List[Tuple[float, float, float, float, float, 
         roll = _safe_float(row.get("Roll")) or 0.0
         pitch = _safe_float(row.get("Pitch")) or 0.0
         yaw = _safe_float(row.get("Yaw") or row.get("Heading")) or 0.0
-        states.append((time_value, lon, lat, alt, roll, pitch, yaw))
+        states.append((time_value, lon, lat, alt, roll, pitch, yaw, None, None, None))
     return states
 
 
@@ -108,7 +155,7 @@ def _discretize(value: float, nvec: int, low: float, high: float) -> int:
     return int(np.clip(round(scaled * (nvec - 1)), 0, nvec - 1))
 
 
-def _build_samples(states: Sequence[Tuple[float, float, float, float, float, float, float]],
+def _build_samples(states: Sequence[Tuple[float, float, float, float, float, float, float, Optional[float], Optional[float], Optional[float]]],
                    config: TacviewBCConfig,
                    action_bins: Sequence[int]) -> Tuple[np.ndarray, np.ndarray]:
     if len(states) < 2:
@@ -121,6 +168,9 @@ def _build_samples(states: Sequence[Tuple[float, float, float, float, float, flo
     roll_deg = np.array([s[4] for s in states], dtype=float)
     pitch_deg = np.array([s[5] for s in states], dtype=float)
     yaw_deg = np.array([s[6] for s in states], dtype=float)
+    target_heading_deg = np.array([s[7] if s[7] is not None else np.nan for s in states], dtype=float)
+    target_alt_m = np.array([s[8] if s[8] is not None else np.nan for s in states], dtype=float)
+    target_speed_mps = np.array([s[9] if s[9] is not None else np.nan for s in states], dtype=float)
 
     origin_lon, origin_lat, origin_alt = lon[0], lat[0], alt[0]
     positions = np.array(
@@ -141,15 +191,48 @@ def _build_samples(states: Sequence[Tuple[float, float, float, float, float, flo
         else:
             headings[i] = _bearing_deg(lat[i], lon[i], lat[i + 1], lon[i + 1])
 
-    target_heading = headings[-1]
-    target_altitude = alt[-1]
-    target_speed = speeds[-1]
+    default_target_heading = headings[-1]
+    default_target_altitude = alt[-1]
+    default_target_speed = speeds[-1]
+
+    if np.isnan(target_heading_deg).all():
+        target_heading_deg = np.full(len(states), default_target_heading, dtype=float)
+    else:
+        last_heading = target_heading_deg[~np.isnan(target_heading_deg)][0]
+        for idx in range(len(target_heading_deg)):
+            if np.isnan(target_heading_deg[idx]):
+                target_heading_deg[idx] = last_heading
+            else:
+                last_heading = target_heading_deg[idx]
+
+    if np.isnan(target_alt_m).all():
+        target_alt_m = np.full(len(states), default_target_altitude, dtype=float)
+    else:
+        last_alt = target_alt_m[~np.isnan(target_alt_m)][0]
+        for idx in range(len(target_alt_m)):
+            if np.isnan(target_alt_m[idx]):
+                target_alt_m[idx] = last_alt
+            else:
+                last_alt = target_alt_m[idx]
+
+    if np.isnan(target_speed_mps).all():
+        target_speed_mps = np.full(len(states), default_target_speed, dtype=float)
+    else:
+        last_speed = target_speed_mps[~np.isnan(target_speed_mps)][0]
+        for idx in range(len(target_speed_mps)):
+            if np.isnan(target_speed_mps[idx]):
+                target_speed_mps[idx] = last_speed
+            else:
+                last_speed = target_speed_mps[idx]
 
     obs_list = []
     act_list = []
     for idx in range(len(headings) - 1):
         if config.stride > 1 and idx % config.stride != 0:
             continue
+        target_heading = target_heading_deg[idx + 1]
+        target_altitude = target_alt_m[idx + 1]
+        target_speed = target_speed_mps[idx + 1]
         delta_heading = _wrap_heading_deg(target_heading - headings[idx])
         delta_altitude = target_altitude - alt[idx + 1]
         delta_speed = target_speed - speeds[idx]
