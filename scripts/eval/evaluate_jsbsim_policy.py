@@ -172,7 +172,7 @@ def main(args: List[str]) -> None:
             if not done_flag:
                 continue
             info = eval_infos[env_idx] if env_idx < len(eval_infos) else {}
-            success_flag = 1 if info.get("heading_turn_counts", 0) > 0 else 0
+            success_flag = 1 if force_done[env_idx] else 0
             length = int(min(episode_steps[env_idx], all_args.max_steps))
             episode_returns.append(float(episode_reward[env_idx]))
             episode_lengths.append(length)
