@@ -20,8 +20,12 @@ from envs.JSBSim.envs import SingleControlEnv
 
 def parse_args() -> argparse.Namespace:
     parser = get_config()
-    parser.add_argument("--model-dir", type=str, required=True,
-                        help="包含 actor_latest.pt 与 critic_latest.pt 的目录。")
+    if "--model-dir" in parser._option_string_actions:
+        parser._option_string_actions["--model-dir"].required = True
+        parser._option_string_actions["--model-dir"].help = "包含 actor_latest.pt 与 critic_latest.pt 的目录。"
+    else:
+        parser.add_argument("--model-dir", type=str, required=True,
+                            help="包含 actor_latest.pt 与 critic_latest.pt 的目录。")
     parser.add_argument("--output-dir", type=str, default="generated_acmi",
                         help="输出目录。")
     parser.add_argument("--episodes", type=int, default=5,
