@@ -101,14 +101,43 @@ def _parse_target_comment(line: str) -> Optional[Tuple[float, float, float]]:
     return heading, altitude, speed
 
 
+def _parse_action_comment(line: str) -> Optional[Tuple[float, float, float, float]]:
+    if not line.startswith("//ACTION"):
+        return None
+    payload = line[len("//ACTION"):].strip()
+    if payload.startswith(":") or payload.startswith("="):
+        payload = payload[1:].strip()
+    tokens = payload.replace(",", " ").split()
+    values = {}
+    for token in tokens:
+        if "=" not in token:
+            continue
+        key, value = token.split("=", 1)
+        parsed = _safe_float(value)
+        if parsed is not None:
+            values[key.strip().lower()] = parsed
+    aileron = values.get("aileron")
+    elevator = values.get("elevator")
+    rudder = values.get("rudder")
+    throttle = values.get("throttle")
+    if aileron is None or elevator is None or rudder is None or throttle is None:
+        return None
+    return aileron, elevator, rudder, throttle
+
+
 def parse_acmi_file(
     path: Path,
-) -> List[Tuple[float, float, float, float, float, float, float, Optional[float], Optional[float], Optional[float]]]:
+) -> List[Tuple[float, float, float, float, float, float, float, Optional[float], Optional[float], Optional[float],
+                Optional[float], Optional[float], Optional[float], Optional[float]]]:
     states = []
     current_time = 0.0
     target_heading = None
     target_alt_m = None
     target_speed_mps = None
+    action_aileron = None
+    action_elevator = None
+    action_rudder = None
+    action_throttle = None
     for raw_line in _read_text_lines(path):
         line = raw_line.strip().lstrip("\ufeff")
         if not line:
@@ -116,6 +145,10 @@ def parse_acmi_file(
         target_values = _parse_target_comment(line)
         if target_values is not None:
             target_heading, target_alt_m, target_speed_mps = target_values
+            continue
+        action_values = _parse_action_comment(line)
+        if action_values is not None:
+            action_aileron, action_elevator, action_rudder, action_throttle = action_values
             continue
         if line.startswith("#"):
             current_time = float(line[1:])
@@ -146,6 +179,10 @@ def parse_acmi_file(
                 target_heading,
                 target_alt_m,
                 target_speed_mps,
+                action_aileron,
+                action_elevator,
+                action_rudder,
+                action_throttle,
             )
         )
     return states
@@ -153,7 +190,8 @@ def parse_acmi_file(
 
 def parse_csv_file(
     path: Path,
-) -> List[Tuple[float, float, float, float, float, float, float, Optional[float], Optional[float], Optional[float]]]:
+) -> List[Tuple[float, float, float, float, float, float, float, Optional[float], Optional[float], Optional[float],
+                Optional[float], Optional[float], Optional[float], Optional[float]]]:
     states = []
     csv_text = "\n".join(_read_text_lines(path))
     reader = csv.DictReader(io.StringIO(csv_text, newline=""))
@@ -169,7 +207,7 @@ def parse_csv_file(
         roll = _safe_float(row.get("Roll")) or 0.0
         pitch = _safe_float(row.get("Pitch")) or 0.0
         yaw = _safe_float(row.get("Yaw") or row.get("Heading")) or 0.0
-        states.append((time_value, lon, lat, alt, roll, pitch, yaw, None, None, None))
+        states.append((time_value, lon, lat, alt, roll, pitch, yaw, None, None, None, None, None, None, None))
     return states
 
 
@@ -179,7 +217,8 @@ def _discretize(value: float, nvec: int, low: float, high: float) -> int:
     return int(np.clip(round(scaled * (nvec - 1)), 0, nvec - 1))
 
 
-def _build_samples(states: Sequence[Tuple[float, float, float, float, float, float, float, Optional[float], Optional[float], Optional[float]]],
+def _build_samples(states: Sequence[Tuple[float, float, float, float, float, float, float, Optional[float], Optional[float], Optional[float],
+                                          Optional[float], Optional[float], Optional[float], Optional[float]]],
                    config: TacviewBCConfig,
                    action_bins: Sequence[int]) -> Tuple[np.ndarray, np.ndarray]:
     if len(states) < 2:
@@ -195,6 +234,10 @@ def _build_samples(states: Sequence[Tuple[float, float, float, float, float, flo
     target_heading_deg = np.array([s[7] if s[7] is not None else np.nan for s in states], dtype=float)
     target_alt_m = np.array([s[8] if s[8] is not None else np.nan for s in states], dtype=float)
     target_speed_mps = np.array([s[9] if s[9] is not None else np.nan for s in states], dtype=float)
+    action_aileron = np.array([s[10] if s[10] is not None else np.nan for s in states], dtype=float)
+    action_elevator = np.array([s[11] if s[11] is not None else np.nan for s in states], dtype=float)
+    action_rudder = np.array([s[12] if s[12] is not None else np.nan for s in states], dtype=float)
+    action_throttle = np.array([s[13] if s[13] is not None else np.nan for s in states], dtype=float)
 
     origin_lon, origin_lat, origin_alt = lon[0], lat[0], alt[0]
     positions = np.array(
@@ -246,8 +289,18 @@ def _build_samples(states: Sequence[Tuple[float, float, float, float, float, flo
         for idx in range(len(target_speed_mps)):
             if np.isnan(target_speed_mps[idx]):
                 target_speed_mps[idx] = last_speed
-            else:
-                last_speed = target_speed_mps[idx]
+        else:
+            last_speed = target_speed_mps[idx]
+
+    action_present = not np.isnan(action_aileron).all()
+    if action_present:
+        for arr in (action_aileron, action_elevator, action_rudder, action_throttle):
+            last_value = arr[~np.isnan(arr)][0]
+            for idx in range(len(arr)):
+                if np.isnan(arr[idx]):
+                    arr[idx] = last_value
+                else:
+                    last_value = arr[idx]
 
     obs_list = []
     act_list = []
@@ -283,15 +336,21 @@ def _build_samples(states: Sequence[Tuple[float, float, float, float, float, flo
         norm_obs[11] = speeds[idx] / 340.0
         norm_obs = np.clip(norm_obs, -10.0, 10.0)
 
-        roll_rate = math.radians(_wrap_heading_deg(roll_deg[idx + 1] - roll_deg[idx])) / dt[idx]
-        pitch_rate = math.radians(_wrap_heading_deg(pitch_deg[idx + 1] - pitch_deg[idx])) / dt[idx]
-        yaw_rate = math.radians(_wrap_heading_deg(headings[idx + 1] - headings[idx])) / dt[idx]
-        speed_rate = (speeds[idx + 1] - speeds[idx]) / dt[idx]
+        if action_present:
+            aileron_cmd = np.clip(action_aileron[idx + 1], -1.0, 1.0)
+            elevator_cmd = np.clip(action_elevator[idx + 1], -1.0, 1.0)
+            rudder_cmd = np.clip(action_rudder[idx + 1], -1.0, 1.0)
+            throttle_cmd = np.clip(action_throttle[idx + 1], 0.4, 0.9)
+        else:
+            roll_rate = math.radians(_wrap_heading_deg(roll_deg[idx + 1] - roll_deg[idx])) / dt[idx]
+            pitch_rate = math.radians(_wrap_heading_deg(pitch_deg[idx + 1] - pitch_deg[idx])) / dt[idx]
+            yaw_rate = math.radians(_wrap_heading_deg(headings[idx + 1] - headings[idx])) / dt[idx]
+            speed_rate = (speeds[idx + 1] - speeds[idx]) / dt[idx]
 
-        aileron_cmd = np.clip(roll_rate / config.roll_rate_limit, -1.0, 1.0)
-        elevator_cmd = np.clip(pitch_rate / config.pitch_rate_limit, -1.0, 1.0)
-        rudder_cmd = np.clip(yaw_rate / config.yaw_rate_limit, -1.0, 1.0)
-        throttle_cmd = np.clip(0.65 + (speed_rate / config.speed_rate_limit) * 0.25, 0.4, 0.9)
+            aileron_cmd = np.clip(roll_rate / config.roll_rate_limit, -1.0, 1.0)
+            elevator_cmd = np.clip(pitch_rate / config.pitch_rate_limit, -1.0, 1.0)
+            rudder_cmd = np.clip(yaw_rate / config.yaw_rate_limit, -1.0, 1.0)
+            throttle_cmd = np.clip(0.65 + (speed_rate / config.speed_rate_limit) * 0.25, 0.4, 0.9)
 
         action = np.array([
             _discretize(aileron_cmd, action_bins[0], -1.0, 1.0),
