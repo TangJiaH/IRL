@@ -54,6 +54,30 @@ def _bearing_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return (math.degrees(math.atan2(x, y)) + 360.0) % 360.0
 
 
+def _ned_to_body(v_north: float, v_east: float, v_down: float, roll_rad: float, pitch_rad: float, yaw_rad: float) -> Tuple[float, float, float]:
+    cr = math.cos(roll_rad)
+    sr = math.sin(roll_rad)
+    cp = math.cos(pitch_rad)
+    sp = math.sin(pitch_rad)
+    cy = math.cos(yaw_rad)
+    sy = math.sin(yaw_rad)
+
+    r11 = cp * cy
+    r12 = cp * sy
+    r13 = -sp
+    r21 = sr * sp * cy - cr * sy
+    r22 = sr * sp * sy + cr * cy
+    r23 = sr * cp
+    r31 = cr * sp * cy + sr * sy
+    r32 = cr * sp * sy - sr * cy
+    r33 = cr * cp
+
+    u = r11 * v_north + r12 * v_east + r13 * v_down
+    v = r21 * v_north + r22 * v_east + r23 * v_down
+    w = r31 * v_north + r32 * v_east + r33 * v_down
+    return u, v, w
+
+
 def _parse_target_comment(line: str) -> Optional[Tuple[float, float, float]]:
     if not line.startswith("//TARGET"):
         return None
@@ -241,6 +265,8 @@ def _build_samples(states: Sequence[Tuple[float, float, float, float, float, flo
         pitch_rad = math.radians(pitch_deg[idx + 1])
         v_north, v_east, v_up = velocities[idx]
         v_down = -v_up
+        yaw_rad = math.radians(headings[idx + 1])
+        v_body_u, v_body_v, v_body_w = _ned_to_body(v_north, v_east, v_down, roll_rad, pitch_rad, yaw_rad)
 
         norm_obs = np.zeros(12, dtype=np.float32)
         norm_obs[0] = delta_altitude / 1000.0
@@ -251,9 +277,9 @@ def _build_samples(states: Sequence[Tuple[float, float, float, float, float, flo
         norm_obs[5] = math.cos(roll_rad)
         norm_obs[6] = math.sin(pitch_rad)
         norm_obs[7] = math.cos(pitch_rad)
-        norm_obs[8] = v_north / 340.0
-        norm_obs[9] = v_east / 340.0
-        norm_obs[10] = v_down / 340.0
+        norm_obs[8] = v_body_u / 340.0
+        norm_obs[9] = v_body_v / 340.0
+        norm_obs[10] = v_body_w / 340.0
         norm_obs[11] = speeds[idx] / 340.0
         norm_obs = np.clip(norm_obs, -10.0, 10.0)
 
