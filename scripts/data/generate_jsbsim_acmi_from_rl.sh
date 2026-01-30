@@ -4,7 +4,7 @@ set -euo pipefail
 script_dir=$(cd "$(dirname "$0")" && pwd)
 root_dir=$(cd "${script_dir}/../.." && pwd)
 
-model_dir="${MODEL_DIR:-}"
+model_dir="${MODEL_DIR:-${root_dir}/scripts/results/SingleControl/1/heading/ppo/group1_rl_from_scratch/wandbrun-20260126_180400-dhx7hgfk/files}"
 output_dir="${root_dir}/generated_acmi"
 episodes=5
 max_steps=1000

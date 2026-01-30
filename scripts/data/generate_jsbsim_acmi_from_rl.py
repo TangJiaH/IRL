@@ -62,6 +62,10 @@ def main() -> None:
 
     actor_path = os.path.join(args.model_dir, "actor_latest.pt")
     critic_path = os.path.join(args.model_dir, "critic_latest.pt")
+    if not os.path.exists(actor_path) or not os.path.exists(critic_path):
+        raise FileNotFoundError(
+            f"未找到模型文件，请检查路径：{args.model_dir}（需要 actor_latest.pt 与 critic_latest.pt）"
+        )
     policy.actor.load_state_dict(torch.load(actor_path, map_location=device))
     policy.critic.load_state_dict(torch.load(critic_path, map_location=device))
     policy.prep_rollout()
