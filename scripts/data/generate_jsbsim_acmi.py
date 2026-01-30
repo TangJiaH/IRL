@@ -30,12 +30,22 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _action_to_controls(action: np.ndarray) -> np.ndarray:
-    aileron = action[0] * 2.0 / 40.0 - 1.0
-    elevator = action[1] * 2.0 / 40.0 - 1.0
-    rudder = action[2] * 2.0 / 40.0 - 1.0
-    throttle = action[3] * 0.5 / 29.0 + 0.4
-    return np.array([aileron, elevator, rudder, throttle], dtype=float)
+def _clamp(value: float, low: float, high: float) -> float:
+    return max(min(value, high), low)
+
+
+def _discretize(value: float, low: float, high: float, n: int) -> int:
+    value = _clamp(value, low, high)
+    ratio = (value - low) / (high - low)
+    return int(round(ratio * (n - 1)))
+
+
+def _rule_based_controls(delta_heading: float, delta_altitude: float, delta_speed: float) -> np.ndarray:
+    heading_cmd = _clamp(delta_heading / 30.0, -1.0, 1.0)
+    altitude_cmd = _clamp(delta_altitude / 300.0, -1.0, 1.0)
+    throttle_cmd = _clamp(0.65 + delta_speed * 0.002, 0.4, 0.9)
+    rudder_cmd = 0.0
+    return np.array([heading_cmd, altitude_cmd, rudder_cmd, throttle_cmd], dtype=float)
 
 
 def main() -> None:
@@ -60,12 +70,21 @@ def main() -> None:
         )
 
         for step in range(args.max_steps):
-            action = np.array([[rng.randint(0, n) for n in env.action_space.nvec]])
-            controls = _action_to_controls(action[0])
+            ego_id = env.ego_ids[0]
+            delta_heading = env.agents[ego_id].get_property_value(c.delta_heading)
+            delta_altitude = env.agents[ego_id].get_property_value(c.delta_altitude)
+            delta_speed = env.agents[ego_id].get_property_value(c.delta_velocities_u)
+            controls = _rule_based_controls(delta_heading, delta_altitude, delta_speed)
+            action = np.array([[
+                _discretize(controls[0], -1.0, 1.0, env.action_space.nvec[0]),
+                _discretize(controls[1], -1.0, 1.0, env.action_space.nvec[1]),
+                _discretize(controls[2], -1.0, 1.0, env.action_space.nvec[2]),
+                _discretize(controls[3], 0.4, 0.9, env.action_space.nvec[3]),
+            ]])
 
-            target_heading = env.agents[env.ego_ids[0]].get_property_value(c.target_heading_deg)
-            target_altitude = env.agents[env.ego_ids[0]].get_property_value(c.target_altitude_ft) * 0.3048
-            target_speed = env.agents[env.ego_ids[0]].get_property_value(c.target_velocities_u_mps)
+            target_heading = env.agents[ego_id].get_property_value(c.target_heading_deg)
+            target_altitude = env.agents[ego_id].get_property_value(c.target_altitude_ft) * 0.3048
+            target_speed = env.agents[ego_id].get_property_value(c.target_velocities_u_mps)
 
             with open(out_path, "a", encoding="utf-8") as f:
                 f.write(f"//TARGET heading_deg={target_heading:.3f} alt_m={target_altitude:.2f} speed_mps={target_speed:.2f}\n")
