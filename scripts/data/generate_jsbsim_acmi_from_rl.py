@@ -111,6 +111,7 @@ def main() -> None:
             target_heading = env.agents[env.ego_ids[0]].get_property_value(c.target_heading_deg)
             target_altitude = env.agents[env.ego_ids[0]].get_property_value(c.target_altitude_ft) * 0.3048
             target_speed = env.agents[env.ego_ids[0]].get_property_value(c.target_velocities_u_mps)
+            state_obs = obs[0]
 
             with open(out_path, "a", encoding="utf-8") as f:
                 f.write(f"//TARGET heading_deg={target_heading:.3f} alt_m={target_altitude:.2f} speed_mps={target_speed:.2f}\n")
@@ -118,6 +119,8 @@ def main() -> None:
                     f"//ACTION aileron={controls[0]:.3f} elevator={controls[1]:.3f} "
                     f"rudder={controls[2]:.3f} throttle={controls[3]:.3f}\n"
                 )
+                state_text = " ".join(f"{value:.6f}" for value in state_obs)
+                f.write(f"//STATE obs={state_text}\n")
 
             obs, _, done, _ = env.step(action)
             env.render_with_tacview(
