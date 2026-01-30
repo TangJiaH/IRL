@@ -1,9 +1,15 @@
 #!/usr/bin/env python
 import argparse
 import os
+import sys
 from datetime import datetime, timezone
 
 import numpy as np
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
 
 from envs.JSBSim.core.catalog import Catalog as c
 from envs.JSBSim.envs import SingleControlEnv
