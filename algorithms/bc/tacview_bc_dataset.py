@@ -54,12 +54,101 @@ def _bearing_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return (math.degrees(math.atan2(x, y)) + 360.0) % 360.0
 
 
-def parse_acmi_file(path: Path) -> List[Tuple[float, float, float, float, float, float, float]]:
+def _ned_to_body(v_north: float, v_east: float, v_down: float, roll_rad: float, pitch_rad: float, yaw_rad: float) -> Tuple[float, float, float]:
+    cr = math.cos(roll_rad)
+    sr = math.sin(roll_rad)
+    cp = math.cos(pitch_rad)
+    sp = math.sin(pitch_rad)
+    cy = math.cos(yaw_rad)
+    sy = math.sin(yaw_rad)
+
+    r11 = cp * cy
+    r12 = cp * sy
+    r13 = -sp
+    r21 = sr * sp * cy - cr * sy
+    r22 = sr * sp * sy + cr * cy
+    r23 = sr * cp
+    r31 = cr * sp * cy + sr * sy
+    r32 = cr * sp * sy - sr * cy
+    r33 = cr * cp
+
+    u = r11 * v_north + r12 * v_east + r13 * v_down
+    v = r21 * v_north + r22 * v_east + r23 * v_down
+    w = r31 * v_north + r32 * v_east + r33 * v_down
+    return u, v, w
+
+
+def _parse_target_comment(line: str) -> Optional[Tuple[float, float, float]]:
+    if not line.startswith("//TARGET"):
+        return None
+    payload = line[len("//TARGET"):].strip()
+    if payload.startswith(":") or payload.startswith("="):
+        payload = payload[1:].strip()
+    tokens = payload.replace(",", " ").split()
+    values = {}
+    for token in tokens:
+        if "=" not in token:
+            continue
+        key, value = token.split("=", 1)
+        parsed = _safe_float(value)
+        if parsed is not None:
+            values[key.strip().lower()] = parsed
+    heading = values.get("heading_deg")
+    altitude = values.get("alt_m")
+    speed = values.get("speed_mps")
+    if heading is None or altitude is None or speed is None:
+        return None
+    return heading, altitude, speed
+
+
+def _parse_action_comment(line: str) -> Optional[Tuple[float, float, float, float]]:
+    if not line.startswith("//ACTION"):
+        return None
+    payload = line[len("//ACTION"):].strip()
+    if payload.startswith(":") or payload.startswith("="):
+        payload = payload[1:].strip()
+    tokens = payload.replace(",", " ").split()
+    values = {}
+    for token in tokens:
+        if "=" not in token:
+            continue
+        key, value = token.split("=", 1)
+        parsed = _safe_float(value)
+        if parsed is not None:
+            values[key.strip().lower()] = parsed
+    aileron = values.get("aileron")
+    elevator = values.get("elevator")
+    rudder = values.get("rudder")
+    throttle = values.get("throttle")
+    if aileron is None or elevator is None or rudder is None or throttle is None:
+        return None
+    return aileron, elevator, rudder, throttle
+
+
+def parse_acmi_file(
+    path: Path,
+) -> List[Tuple[float, float, float, float, float, float, float, Optional[float], Optional[float], Optional[float],
+                Optional[float], Optional[float], Optional[float], Optional[float]]]:
     states = []
     current_time = 0.0
+    target_heading = None
+    target_alt_m = None
+    target_speed_mps = None
+    action_aileron = None
+    action_elevator = None
+    action_rudder = None
+    action_throttle = None
     for raw_line in _read_text_lines(path):
         line = raw_line.strip().lstrip("\ufeff")
         if not line:
+            continue
+        target_values = _parse_target_comment(line)
+        if target_values is not None:
+            target_heading, target_alt_m, target_speed_mps = target_values
+            continue
+        action_values = _parse_action_comment(line)
+        if action_values is not None:
+            action_aileron, action_elevator, action_rudder, action_throttle = action_values
             continue
         if line.startswith("#"):
             current_time = float(line[1:])
@@ -78,11 +167,31 @@ def parse_acmi_file(path: Path) -> List[Tuple[float, float, float, float, float,
         roll = _safe_float(fields[3]) if len(fields) > 3 else 0.0
         pitch = _safe_float(fields[4]) if len(fields) > 4 else 0.0
         yaw = _safe_float(fields[5]) if len(fields) > 5 else None
-        states.append((current_time, lon, lat, alt, roll or 0.0, pitch or 0.0, yaw or 0.0))
+        states.append(
+            (
+                current_time,
+                lon,
+                lat,
+                alt,
+                roll or 0.0,
+                pitch or 0.0,
+                yaw or 0.0,
+                target_heading,
+                target_alt_m,
+                target_speed_mps,
+                action_aileron,
+                action_elevator,
+                action_rudder,
+                action_throttle,
+            )
+        )
     return states
 
 
-def parse_csv_file(path: Path) -> List[Tuple[float, float, float, float, float, float, float]]:
+def parse_csv_file(
+    path: Path,
+) -> List[Tuple[float, float, float, float, float, float, float, Optional[float], Optional[float], Optional[float],
+                Optional[float], Optional[float], Optional[float], Optional[float]]]:
     states = []
     csv_text = "\n".join(_read_text_lines(path))
     reader = csv.DictReader(io.StringIO(csv_text, newline=""))
@@ -98,7 +207,7 @@ def parse_csv_file(path: Path) -> List[Tuple[float, float, float, float, float, 
         roll = _safe_float(row.get("Roll")) or 0.0
         pitch = _safe_float(row.get("Pitch")) or 0.0
         yaw = _safe_float(row.get("Yaw") or row.get("Heading")) or 0.0
-        states.append((time_value, lon, lat, alt, roll, pitch, yaw))
+        states.append((time_value, lon, lat, alt, roll, pitch, yaw, None, None, None, None, None, None, None))
     return states
 
 
@@ -108,7 +217,8 @@ def _discretize(value: float, nvec: int, low: float, high: float) -> int:
     return int(np.clip(round(scaled * (nvec - 1)), 0, nvec - 1))
 
 
-def _build_samples(states: Sequence[Tuple[float, float, float, float, float, float, float]],
+def _build_samples(states: Sequence[Tuple[float, float, float, float, float, float, float, Optional[float], Optional[float], Optional[float],
+                                          Optional[float], Optional[float], Optional[float], Optional[float]]],
                    config: TacviewBCConfig,
                    action_bins: Sequence[int]) -> Tuple[np.ndarray, np.ndarray]:
     if len(states) < 2:
@@ -121,6 +231,13 @@ def _build_samples(states: Sequence[Tuple[float, float, float, float, float, flo
     roll_deg = np.array([s[4] for s in states], dtype=float)
     pitch_deg = np.array([s[5] for s in states], dtype=float)
     yaw_deg = np.array([s[6] for s in states], dtype=float)
+    target_heading_deg = np.array([s[7] if s[7] is not None else np.nan for s in states], dtype=float)
+    target_alt_m = np.array([s[8] if s[8] is not None else np.nan for s in states], dtype=float)
+    target_speed_mps = np.array([s[9] if s[9] is not None else np.nan for s in states], dtype=float)
+    action_aileron = np.array([s[10] if s[10] is not None else np.nan for s in states], dtype=float)
+    action_elevator = np.array([s[11] if s[11] is not None else np.nan for s in states], dtype=float)
+    action_rudder = np.array([s[12] if s[12] is not None else np.nan for s in states], dtype=float)
+    action_throttle = np.array([s[13] if s[13] is not None else np.nan for s in states], dtype=float)
 
     origin_lon, origin_lat, origin_alt = lon[0], lat[0], alt[0]
     positions = np.array(
@@ -141,15 +258,58 @@ def _build_samples(states: Sequence[Tuple[float, float, float, float, float, flo
         else:
             headings[i] = _bearing_deg(lat[i], lon[i], lat[i + 1], lon[i + 1])
 
-    target_heading = headings[-1]
-    target_altitude = alt[-1]
-    target_speed = speeds[-1]
+    default_target_heading = headings[-1]
+    default_target_altitude = alt[-1]
+    default_target_speed = speeds[-1]
+
+    if np.isnan(target_heading_deg).all():
+        target_heading_deg = np.full(len(states), default_target_heading, dtype=float)
+    else:
+        last_heading = target_heading_deg[~np.isnan(target_heading_deg)][0]
+        for idx in range(len(target_heading_deg)):
+            if np.isnan(target_heading_deg[idx]):
+                target_heading_deg[idx] = last_heading
+            else:
+                last_heading = target_heading_deg[idx]
+
+    if np.isnan(target_alt_m).all():
+        target_alt_m = np.full(len(states), default_target_altitude, dtype=float)
+    else:
+        last_alt = target_alt_m[~np.isnan(target_alt_m)][0]
+        for idx in range(len(target_alt_m)):
+            if np.isnan(target_alt_m[idx]):
+                target_alt_m[idx] = last_alt
+            else:
+                last_alt = target_alt_m[idx]
+
+    if np.isnan(target_speed_mps).all():
+        target_speed_mps = np.full(len(states), default_target_speed, dtype=float)
+    else:
+        last_speed = target_speed_mps[~np.isnan(target_speed_mps)][0]
+        for idx in range(len(target_speed_mps)):
+            if np.isnan(target_speed_mps[idx]):
+                target_speed_mps[idx] = last_speed
+        else:
+            last_speed = target_speed_mps[idx]
+
+    action_present = not np.isnan(action_aileron).all()
+    if action_present:
+        for arr in (action_aileron, action_elevator, action_rudder, action_throttle):
+            last_value = arr[~np.isnan(arr)][0]
+            for idx in range(len(arr)):
+                if np.isnan(arr[idx]):
+                    arr[idx] = last_value
+                else:
+                    last_value = arr[idx]
 
     obs_list = []
     act_list = []
     for idx in range(len(headings) - 1):
         if config.stride > 1 and idx % config.stride != 0:
             continue
+        target_heading = target_heading_deg[idx + 1]
+        target_altitude = target_alt_m[idx + 1]
+        target_speed = target_speed_mps[idx + 1]
         delta_heading = _wrap_heading_deg(target_heading - headings[idx])
         delta_altitude = target_altitude - alt[idx + 1]
         delta_speed = target_speed - speeds[idx]
@@ -158,6 +318,8 @@ def _build_samples(states: Sequence[Tuple[float, float, float, float, float, flo
         pitch_rad = math.radians(pitch_deg[idx + 1])
         v_north, v_east, v_up = velocities[idx]
         v_down = -v_up
+        yaw_rad = math.radians(headings[idx + 1])
+        v_body_u, v_body_v, v_body_w = _ned_to_body(v_north, v_east, v_down, roll_rad, pitch_rad, yaw_rad)
 
         norm_obs = np.zeros(12, dtype=np.float32)
         norm_obs[0] = delta_altitude / 1000.0
@@ -168,21 +330,27 @@ def _build_samples(states: Sequence[Tuple[float, float, float, float, float, flo
         norm_obs[5] = math.cos(roll_rad)
         norm_obs[6] = math.sin(pitch_rad)
         norm_obs[7] = math.cos(pitch_rad)
-        norm_obs[8] = v_north / 340.0
-        norm_obs[9] = v_east / 340.0
-        norm_obs[10] = v_down / 340.0
+        norm_obs[8] = v_body_u / 340.0
+        norm_obs[9] = v_body_v / 340.0
+        norm_obs[10] = v_body_w / 340.0
         norm_obs[11] = speeds[idx] / 340.0
         norm_obs = np.clip(norm_obs, -10.0, 10.0)
 
-        roll_rate = math.radians(_wrap_heading_deg(roll_deg[idx + 1] - roll_deg[idx])) / dt[idx]
-        pitch_rate = math.radians(_wrap_heading_deg(pitch_deg[idx + 1] - pitch_deg[idx])) / dt[idx]
-        yaw_rate = math.radians(_wrap_heading_deg(headings[idx + 1] - headings[idx])) / dt[idx]
-        speed_rate = (speeds[idx + 1] - speeds[idx]) / dt[idx]
+        if action_present:
+            aileron_cmd = np.clip(action_aileron[idx + 1], -1.0, 1.0)
+            elevator_cmd = np.clip(action_elevator[idx + 1], -1.0, 1.0)
+            rudder_cmd = np.clip(action_rudder[idx + 1], -1.0, 1.0)
+            throttle_cmd = np.clip(action_throttle[idx + 1], 0.4, 0.9)
+        else:
+            roll_rate = math.radians(_wrap_heading_deg(roll_deg[idx + 1] - roll_deg[idx])) / dt[idx]
+            pitch_rate = math.radians(_wrap_heading_deg(pitch_deg[idx + 1] - pitch_deg[idx])) / dt[idx]
+            yaw_rate = math.radians(_wrap_heading_deg(headings[idx + 1] - headings[idx])) / dt[idx]
+            speed_rate = (speeds[idx + 1] - speeds[idx]) / dt[idx]
 
-        aileron_cmd = np.clip(roll_rate / config.roll_rate_limit, -1.0, 1.0)
-        elevator_cmd = np.clip(pitch_rate / config.pitch_rate_limit, -1.0, 1.0)
-        rudder_cmd = np.clip(yaw_rate / config.yaw_rate_limit, -1.0, 1.0)
-        throttle_cmd = np.clip(0.65 + (speed_rate / config.speed_rate_limit) * 0.25, 0.4, 0.9)
+            aileron_cmd = np.clip(roll_rate / config.roll_rate_limit, -1.0, 1.0)
+            elevator_cmd = np.clip(pitch_rate / config.pitch_rate_limit, -1.0, 1.0)
+            rudder_cmd = np.clip(yaw_rate / config.yaw_rate_limit, -1.0, 1.0)
+            throttle_cmd = np.clip(0.65 + (speed_rate / config.speed_rate_limit) * 0.25, 0.4, 0.9)
 
         action = np.array([
             _discretize(aileron_cmd, action_bins[0], -1.0, 1.0),

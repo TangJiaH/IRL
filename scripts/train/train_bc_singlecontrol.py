@@ -27,6 +27,16 @@ def parse_args() -> argparse.Namespace:
                         help="行为克隆批大小。")
     parser.add_argument("--bc-lr", type=float, default=1e-3,
                         help="行为克隆学习率。")
+    parser.add_argument("--bc-weight-decay", type=float, default=1e-4,
+                        help="行为克隆权重衰减（L2 正则）。")
+    parser.add_argument("--bc-grad-clip", type=float, default=0.5,
+                        help="行为克隆梯度裁剪阈值（0 表示不裁剪）。")
+    parser.add_argument("--bc-lr-factor", type=float, default=0.5,
+                        help="验证损失停滞时学习率衰减系数。")
+    parser.add_argument("--bc-lr-patience", type=int, default=5,
+                        help="验证损失停滞的轮次数后触发学习率衰减。")
+    parser.add_argument("--bc-lr-min", type=float, default=1e-6,
+                        help="学习率衰减的最小值。")
     parser.add_argument("--roll-rate-limit", type=float, default=1.2,
                         help="滚转角速度归一化上限（rad/s）。")
     parser.add_argument("--pitch-rate-limit", type=float, default=0.8,
@@ -138,6 +148,8 @@ def _train_bc_epoch(policy: PPOPolicy, dataloader: DataLoader, optimizer: torch.
 
         optimizer.zero_grad()
         loss.backward()
+        if args.bc_grad_clip > 0:
+            torch.nn.utils.clip_grad_norm_(policy.actor.parameters(), args.bc_grad_clip)
         optimizer.step()
 
         total_loss += loss.item() * batch_size
@@ -205,7 +217,18 @@ def main() -> None:
 
     policy = PPOPolicy(args, obs_space, act_space, device=device)
     policy.actor.train()
-    optimizer = torch.optim.Adam(policy.actor.parameters(), lr=args.bc_lr)
+    optimizer = torch.optim.AdamW(
+        policy.actor.parameters(),
+        lr=args.bc_lr,
+        weight_decay=args.bc_weight_decay,
+    )
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode="min",
+        factor=args.bc_lr_factor,
+        patience=args.bc_lr_patience,
+        min_lr=args.bc_lr_min,
+    )
 
     env = None
     if args.dagger_iterations > 0:
@@ -218,9 +241,11 @@ def main() -> None:
             avg_loss = _train_bc_epoch(policy, dataloader, optimizer, device, args)
             if val_loader is not None:
                 val_loss = _eval_bc_epoch(policy, val_loader, device, args)
+                scheduler.step(val_loss)
                 print(f"迭代 {iteration + 1}/{args.dagger_iterations + 1} 轮次 {epoch + 1}/{args.epochs} "
                       f"- BC 损失: {avg_loss:.6f} - 验证损失: {val_loss:.6f}")
             else:
+                scheduler.step(avg_loss)
                 print(f"迭代 {iteration + 1}/{args.dagger_iterations + 1} 轮次 {epoch + 1}/{args.epochs} - BC 损失: {avg_loss:.6f}")
 
         if iteration < args.dagger_iterations:
