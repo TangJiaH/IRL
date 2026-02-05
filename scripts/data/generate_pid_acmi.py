@@ -70,6 +70,13 @@ def parse_args() -> argparse.Namespace:
                         help="油门基准值。")
     parser.add_argument("--reward-csv", type=str, default="",
                         help="可选：保存每条轨迹奖励统计结果。")
+    parser.add_argument("--adaptive-gains", action="store_true",
+                        help="启用基于每步奖励变化的在线增益自适应（RL 风格）。")
+    parser.add_argument("--gain-lr", type=float, default=0.05,
+                        help="增益在线更新学习率。")
+    parser.add_argument("--heading-kp-bounds", type=float, nargs=2, default=[0.005, 0.2])
+    parser.add_argument("--altitude-kp-bounds", type=float, nargs=2, default=[0.001, 0.08])
+    parser.add_argument("--speed-kp-bounds", type=float, nargs=2, default=[0.001, 0.08])
     return parser.parse_args()
 
 
@@ -85,6 +92,29 @@ def _discretize(value: float, low: float, high: float, n: int) -> int:
 
 def _wrap_deg(angle: float) -> float:
     return (angle + 180.0) % 360.0 - 180.0
+
+
+def _adapt_pid_gain(pid: PIDController, signal: float, lr: float, min_kp: float, max_kp: float) -> None:
+    scaled_signal = float(np.tanh(signal))
+    pid.kp = _clamp(pid.kp * (1.0 + lr * scaled_signal), min_kp, max_kp)
+
+
+def _reward_driven_adapt(
+    heading_pid: PIDController,
+    altitude_pid: PIDController,
+    speed_pid: PIDController,
+    reward_now: float,
+    reward_prev: float,
+    errors_prev: dict,
+    errors_now: dict,
+    lr: float,
+    kp_bounds: dict,
+) -> None:
+    reward_delta = reward_now - reward_prev
+    for key, controller in (("heading", heading_pid), ("altitude", altitude_pid), ("speed", speed_pid)):
+        error_reduction = abs(errors_prev[key]) - abs(errors_now[key])
+        signal = reward_delta * error_reduction
+        _adapt_pid_gain(controller, signal, lr, kp_bounds[key][0], kp_bounds[key][1])
 
 
 def main() -> None:
@@ -107,6 +137,11 @@ def main() -> None:
         args.speed_kp, args.speed_ki, args.speed_kd, args.integral_limit, output_limit=0.25
     )
     reward_summaries = []
+    kp_bounds = {
+        "heading": tuple(args.heading_kp_bounds),
+        "altitude": tuple(args.altitude_kp_bounds),
+        "speed": tuple(args.speed_kp_bounds),
+    }
 
     for episode in range(args.episodes):
         env.reset()
@@ -125,6 +160,8 @@ def main() -> None:
             _should_save_acmi=True,
         )
         episode_rewards = []
+        prev_reward = 0.0
+        prev_errors = None
 
         for step in range(args.max_steps):
             ego_id = env.ego_ids[0]
@@ -173,8 +210,34 @@ def main() -> None:
             step_reward = float(np.array(reward).reshape(-1)[0])
             episode_rewards.append(step_reward)
 
+            curr_errors = {
+                "heading": heading_error,
+                "altitude": altitude_error,
+                "speed": speed_error,
+            }
+            if args.adaptive_gains and prev_errors is not None:
+                _reward_driven_adapt(
+                    heading_pid,
+                    altitude_pid,
+                    speed_pid,
+                    reward_now=step_reward,
+                    reward_prev=prev_reward,
+                    errors_prev=prev_errors,
+                    errors_now=curr_errors,
+                    lr=args.gain_lr,
+                    kp_bounds=kp_bounds,
+                )
+
             with open(out_path, "a", encoding="utf-8") as f:
                 f.write(f"//REWARD total={step_reward:.6f}\n")
+                if args.adaptive_gains:
+                    f.write(
+                        f"//GAINS heading_kp={heading_pid.kp:.6f} "
+                        f"altitude_kp={altitude_pid.kp:.6f} speed_kp={speed_pid.kp:.6f}\n"
+                    )
+
+            prev_reward = step_reward
+            prev_errors = curr_errors
 
             env.render_with_tacview(
                 render_mode="histroy_acmi",
@@ -197,7 +260,8 @@ def main() -> None:
         })
         print(
             f"已生成: {out_path} | steps={len(episode_rewards)} "
-            f"reward_sum={total_reward:.4f} reward_mean={mean_reward:.6f}"
+            f"reward_sum={total_reward:.4f} reward_mean={mean_reward:.6f} "
+            f"final_kp[h={heading_pid.kp:.4f},a={altitude_pid.kp:.4f},s={speed_pid.kp:.4f}]"
         )
 
     if args.reward_csv and reward_summaries:
