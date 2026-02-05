@@ -100,6 +100,14 @@ python render*.py
 ```
 This will generate a `*.acmi` file. We can use [**TacView**](https://www.tacview.net/), a universal flight analysis tool, to open the file and watch the render videos.
 
+## Expert Dataset & Reward Scoring
+下面的脚本基于 `SingleControl` 的 heading 任务生成专家轨迹（每条轨迹 1000 步），并用飞控奖励函数进行评分：
+
+```bash
+python scripts/data/generate_pid_acmi.py --output-dir generated_acmi --episodes 10 --max-steps 1000 --env-config 1/heading
+python scripts/data/score_acmi_heading_reward.py --acmi-path generated_acmi --env-config 1/heading --output-csv generated_acmi/pid_scores.csv
+```
+
 ## Citing
 If you find this repo useful, pleased use the following citation:
 ````
