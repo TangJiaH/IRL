@@ -17,6 +17,8 @@ N_SEEDS = 5
 TAIL_POINTS = 32  # ~last 1M steps when eval_interval=32k
 CONVERGENCE_N = 5
 RNG_SEED = 20250205
+RHO = 0.85
+TAU = 4e6
 
 
 @dataclass(frozen=True)
@@ -25,48 +27,82 @@ class AlgoSpec:
     final_mean: float
     final_std: float
     k: float
-    noise_hi: float
-    noise_lo: float
-    heavy_tail: bool = False
-    smooth: bool = False
+    sigma_start: float
+    sigma_floor: float
 
 
 ALGO_SPECS = [
-    AlgoSpec("PPO", final_mean=374.6, final_std=22.9, k=1.9e-7, noise_hi=36.0, noise_lo=11.0, heavy_tail=True, smooth=False),
-    AlgoSpec("BC-RL", final_mean=498.0, final_std=38.0, k=2.35e-7, noise_hi=28.0, noise_lo=16.0, heavy_tail=False, smooth=False),
-    AlgoSpec("SKC-PPO-F", final_mean=545.0, final_std=34.0, k=2.85e-7, noise_hi=18.0, noise_lo=9.0, heavy_tail=False, smooth=True),
-    AlgoSpec("SKC-PPO", final_mean=588.0, final_std=29.0, k=3.25e-7, noise_hi=14.0, noise_lo=7.0, heavy_tail=False, smooth=True),
+    AlgoSpec("PPO", final_mean=374.6, final_std=22.9, k=1.9e-7, sigma_start=60.0, sigma_floor=20.0),
+    AlgoSpec("BC-RL", final_mean=498.0, final_std=38.0, k=2.35e-7, sigma_start=55.0, sigma_floor=18.0),
+    AlgoSpec("SKC-PPO-F", final_mean=545.0, final_std=34.0, k=2.85e-7, sigma_start=45.0, sigma_floor=14.0),
+    AlgoSpec("SKC-PPO", final_mean=588.0, final_std=29.0, k=3.25e-7, sigma_start=40.0, sigma_floor=12.0),
 ]
-
-
-def moving_average(x: np.ndarray, window: int = 3) -> np.ndarray:
-    if window <= 1:
-        return x.copy()
-    pad = window // 2
-    padded = np.pad(x, (pad, pad), mode="edge")
-    kernel = np.ones(window, dtype=float) / window
-    return np.convolve(padded, kernel, mode="valid")
 
 
 def make_dropout(steps: np.ndarray, center: float, width: float, depth: float) -> np.ndarray:
     return -depth * np.exp(-0.5 * ((steps - center) / width) ** 2)
 
 
-def calibrate_tail(reward: np.ndarray, target_mean: float, target_std: float, n_tail: int = TAIL_POINTS) -> np.ndarray:
+def generate_ar1_noise(sigmas: np.ndarray, rho: float, rng: np.random.Generator) -> np.ndarray:
+    noise = np.zeros_like(sigmas, dtype=float)
+    scale = np.sqrt(1.0 - rho**2)
+    for i in range(1, len(sigmas)):
+        noise[i] = rho * noise[i - 1] + scale * rng.normal(0.0, sigmas[i])
+    return noise
+
+
+def cap_tail_volatility(
+    reward: np.ndarray,
+    base: np.ndarray,
+    target_std: float,
+    tail_points: int = TAIL_POINTS,
+    trigger_ratio: float = 1.15,
+    cap_ratio: float = 1.05,
+) -> np.ndarray:
     out = reward.copy()
-    tail = out[-n_tail:]
-    mu = float(np.mean(tail))
-    sigma = float(np.std(tail, ddof=0))
+    tail = out[-tail_points:]
+    cur_std = float(np.std(tail, ddof=0))
+    if cur_std <= trigger_ratio * target_std:
+        return out
 
-    if sigma < 1e-12:
-        # avoid divide-by-zero; inject tiny spread before calibrating
-        eps = np.linspace(-1e-3, 1e-3, len(tail))
-        tail = tail + eps
-        sigma = float(np.std(tail, ddof=0))
+    base_tail = base[-tail_points:]
+    noise_tail = tail - base_tail
+    centered = noise_tail - np.mean(noise_tail)
+    if np.std(centered, ddof=0) < 1e-12:
+        return out
 
-    a = target_std / sigma
-    b = target_mean - a * mu
-    out[-n_tail:] = a * tail + b
+    factor = (cap_ratio * target_std) / cur_std
+    new_noise_tail = np.mean(noise_tail) + factor * centered
+    out[-tail_points:] = base_tail + new_noise_tail
+    return out
+
+
+def align_tail_mean_only(reward: np.ndarray, target_mean: float, tail_points: int = TAIL_POINTS) -> np.ndarray:
+    m_last = float(np.mean(reward[-tail_points:]))
+    return reward + (target_mean - m_last)
+
+
+def enforce_skc_tail_not_exceed_mid(reward: np.ndarray, base: np.ndarray, tail_points: int = TAIL_POINTS) -> np.ndarray:
+    out = reward.copy()
+    # Mid region: 8M~12M, tail region: last 1M
+    mid_mask = (np.arange(len(out)) * EVAL_INTERVAL >= 8_000_000) & (np.arange(len(out)) * EVAL_INTERVAL <= 12_000_000)
+    mid_std = float(np.std(out[mid_mask], ddof=0))
+    tail = out[-tail_points:]
+    tail_std = float(np.std(tail, ddof=0))
+
+    if tail_std <= mid_std:
+        return out
+
+    base_tail = base[-tail_points:]
+    noise_tail = tail - base_tail
+    centered = noise_tail - np.mean(noise_tail)
+    centered_std = float(np.std(centered, ddof=0))
+    if centered_std < 1e-12:
+        return out
+
+    factor = max(0.0, (0.95 * mid_std) / tail_std)
+    new_noise_tail = np.mean(noise_tail) + factor * centered
+    out[-tail_points:] = base_tail + new_noise_tail
     return out
 
 
@@ -87,66 +123,44 @@ def main() -> None:
 
     for spec in ALGO_SPECS:
         for seed in range(N_SEEDS):
-            # Exponential rise-to-plateau + per-seed variation in asymptote/speed
-            L = spec.final_mean * (1.0 + rng.normal(0, 0.035))
-            k = spec.k * (1.0 + rng.normal(0, 0.08))
+            # Exponential rise-to-plateau trend with per-seed small variation.
+            L = spec.final_mean * (1.0 + rng.normal(0, 0.03))
+            k = spec.k * (1.0 + rng.normal(0, 0.07))
             trend = L * (1.0 - np.exp(-k * steps))
 
-            # Decaying noise envelope
-            prog = steps / TOTAL_STEPS
-            envelope = spec.noise_lo + (spec.noise_hi - spec.noise_lo) * np.exp(-3.0 * prog)
-            noise = rng.normal(0.0, envelope)
+            # AR(1) correlated noise with monotonically decaying sigma_t.
+            sigmas = spec.sigma_start * np.exp(-steps / TAU) + spec.sigma_floor
+            noise = generate_ar1_noise(sigmas=sigmas, rho=RHO, rng=rng)
 
-            # Heavy-tailed PPO spikes
-            if spec.heavy_tail:
-                spike_mask = rng.random(len(steps)) < 0.06
-                spike_noise = rng.standard_t(df=3, size=len(steps)) * (0.45 * envelope)
-                noise = noise + spike_mask * spike_noise
-
-            # BC-RL: larger mid/late instability
-            if spec.name == "BC-RL":
-                late_boost = 1.0 + 0.45 / (1.0 + np.exp(-(prog - 0.65) * 16.0))
-                noise = noise * late_boost
-
-            reward = trend + noise
-
-            # Dropout events
+            # Method-specific dropout events.
+            event = np.zeros_like(trend)
             if spec.name == "PPO":
-                c = 15_000_000 + rng.normal(0, 260_000)
-                w = 320_000 + rng.uniform(-50_000, 70_000)
-                d = rng.uniform(48, 68)
-                reward += make_dropout(steps, center=c, width=w, depth=d)
+                # one clear rollback around 15M
+                c = 15_000_000 + rng.normal(0, 220_000)
+                w = 300_000 + rng.uniform(-40_000, 50_000)
+                d = rng.uniform(45, 62)
+                event += make_dropout(steps, center=c, width=w, depth=d)
             elif spec.name == "BC-RL":
-                n_drop = int(rng.integers(1, 3))
-                for _ in range(n_drop):
-                    c = rng.uniform(13_000_000, 19_000_000)
-                    w = rng.uniform(190_000, 420_000)
-                    d = rng.uniform(28, 62)
-                    reward += make_dropout(steps, center=c, width=w, depth=d)
-            elif spec.name == "SKC-PPO-F":
-                if rng.random() < 0.45:
-                    reward += make_dropout(
-                        steps,
-                        center=rng.uniform(12_500_000, 18_500_000),
-                        width=rng.uniform(160_000, 300_000),
-                        depth=rng.uniform(8, 20),
-                    )
-            elif spec.name == "SKC-PPO":
-                if rng.random() < 0.25:
-                    reward += make_dropout(
-                        steps,
-                        center=rng.uniform(14_000_000, 18_500_000),
-                        width=rng.uniform(140_000, 240_000),
-                        depth=rng.uniform(4, 12),
-                    )
+                # one small late rollback (<40)
+                c = rng.uniform(13_500_000, 18_500_000)
+                w = rng.uniform(170_000, 320_000)
+                d = rng.uniform(20, 38)
+                event += make_dropout(steps, center=c, width=w, depth=d)
+            # SKC-PPO / SKC-PPO-F: no large rollback events.
 
-            if spec.smooth:
-                reward = moving_average(reward, window=3)
-
+            base = trend + event
+            reward = base + noise
             reward = np.maximum(reward, -20.0)
 
-            # Force tail mean/std calibration to exactly match targets
-            reward = calibrate_tail(reward, spec.final_mean, spec.final_std, n_tail=TAIL_POINTS)
+            # Tail volatility cap: shrink tail noise only if too large.
+            reward = cap_tail_volatility(reward=reward, base=base, target_std=spec.final_std)
+
+            # Extra SKC realism constraint: tail fluctuation <= mid fluctuation.
+            if spec.name in {"SKC-PPO", "SKC-PPO-F"}:
+                reward = enforce_skc_tail_not_exceed_mid(reward=reward, base=base)
+
+            # Calibration rule: mean-align only (no scaling to match std per seed).
+            reward = align_tail_mean_only(reward, target_mean=spec.final_mean)
 
             algo_seed_curves[spec.name].append(reward)
             all_rows.extend(
@@ -196,10 +210,8 @@ def main() -> None:
     conv_rows = []
     for spec in ALGO_SPECS:
         threshold = 0.95 * spec.final_mean
-        conv_steps = []
         for seed_idx, curve in enumerate(algo_seed_curves[spec.name]):
             cstep = find_convergence_step(curve, steps, threshold=threshold, n_keep=CONVERGENCE_N)
-            conv_steps.append(cstep)
             conv_rows.append(
                 {
                     "algo": spec.name,
@@ -236,13 +248,14 @@ def main() -> None:
     fig2.savefig("fig_convergence_steps.pdf")
     plt.close(fig2)
 
-    # Display terminal summary
-    print("Tail calibration check (last 32 eval points per seed):")
+    # Display terminal summary.
+    print("Tail summary (last 32 eval points):")
     tail_start_step = steps[-TAIL_POINTS]
     for spec in ALGO_SPECS:
         sub = df[(df["algo"] == spec.name) & (df["step"] >= tail_start_step)]
         per_seed = sub.groupby("seed")["reward"].agg(["mean", "std"])
-        print(f"\\n{spec.name} target mean={spec.final_mean:.3f}, std={spec.final_std:.3f}")
+        print(f"\\n{spec.name} target mean={spec.final_mean:.3f}, target std={spec.final_std:.3f}")
+        print(f"  average over seeds: mean={per_seed['mean'].mean():.3f}, std={per_seed['std'].mean():.3f}")
         for seed, row in per_seed.iterrows():
             print(f"  seed={seed}: mean={row['mean']:.3f}, std={row['std']:.3f}")
 
