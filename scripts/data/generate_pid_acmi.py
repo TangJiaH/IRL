@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import argparse
+import csv
 import os
 import sys
 from datetime import datetime, timezone
@@ -67,6 +68,8 @@ def parse_args() -> argparse.Namespace:
                         help="方向舵跟随比例（heading PID 输出的缩放）。")
     parser.add_argument("--throttle-bias", type=float, default=0.65,
                         help="油门基准值。")
+    parser.add_argument("--reward-csv", type=str, default="",
+                        help="可选：保存每条轨迹奖励统计结果。")
     return parser.parse_args()
 
 
@@ -103,6 +106,7 @@ def main() -> None:
     speed_pid = PIDController(
         args.speed_kp, args.speed_ki, args.speed_kd, args.integral_limit, output_limit=0.25
     )
+    reward_summaries = []
 
     for episode in range(args.episodes):
         env.reset()
@@ -120,6 +124,7 @@ def main() -> None:
             timestamp=0.0,
             _should_save_acmi=True,
         )
+        episode_rewards = []
 
         for step in range(args.max_steps):
             ego_id = env.ego_ids[0]
@@ -164,7 +169,13 @@ def main() -> None:
                     f"rudder={rudder_cmd:.3f} throttle={throttle_cmd:.3f}\n"
                 )
 
-            _, _, done, _ = env.step(action)
+            _, reward, done, _ = env.step(action)
+            step_reward = float(np.array(reward).reshape(-1)[0])
+            episode_rewards.append(step_reward)
+
+            with open(out_path, "a", encoding="utf-8") as f:
+                f.write(f"//REWARD total={step_reward:.6f}\n")
+
             env.render_with_tacview(
                 render_mode="histroy_acmi",
                 acmi_filename=out_path,
@@ -175,7 +186,27 @@ def main() -> None:
             if done.any():
                 break
 
-        print(f"已生成: {out_path}")
+        total_reward = float(np.sum(episode_rewards))
+        mean_reward = float(np.mean(episode_rewards)) if episode_rewards else 0.0
+        reward_summaries.append({
+            "episode": episode + 1,
+            "file": out_path,
+            "steps": len(episode_rewards),
+            "reward_sum": total_reward,
+            "reward_mean": mean_reward,
+        })
+        print(
+            f"已生成: {out_path} | steps={len(episode_rewards)} "
+            f"reward_sum={total_reward:.4f} reward_mean={mean_reward:.6f}"
+        )
+
+    if args.reward_csv and reward_summaries:
+        os.makedirs(os.path.dirname(args.reward_csv) or ".", exist_ok=True)
+        with open(args.reward_csv, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["episode", "file", "steps", "reward_sum", "reward_mean"])
+            writer.writeheader()
+            writer.writerows(reward_summaries)
+        print(f"奖励统计已保存: {args.reward_csv}")
 
     env.close()
 
