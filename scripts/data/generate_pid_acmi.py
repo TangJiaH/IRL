@@ -123,7 +123,7 @@ def main() -> None:
 
         for step in range(args.max_steps):
             ego_id = env.ego_ids[0]
-            current_heading = env.agents[ego_id].get_property_value(c.attitude_heading_true_deg)
+            current_heading = env.agents[ego_id].get_property_value(c.attitude_psi_deg)
             current_altitude = env.agents[ego_id].get_property_value(c.position_h_sl_m)
             current_speed = env.agents[ego_id].get_property_value(c.velocities_u_mps)
 
