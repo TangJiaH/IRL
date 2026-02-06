@@ -155,6 +155,103 @@ def summarize_last1m(
     return pd.DataFrame(rows)
 
 
+
+
+def plot_reward_with_convergence(
+    rewards_csv: str = "mock_rewards.csv",
+    convergence_csv: str = "convergence_steps.csv",
+    output_path: str = "fig_reward_curves_with_convergence.png",
+) -> None:
+    """Plot mean±std reward curves with threshold/convergence visual cues."""
+    df = pd.read_csv(rewards_csv)
+    conv_df = pd.read_csv(convergence_csv)
+
+    if "conv_mean" in conv_df.columns:
+        conv_mean_col = "conv_mean"
+    elif "convergence_mean" in conv_df.columns:
+        conv_mean_col = "convergence_mean"
+    else:
+        # fallback: compute from per-seed convergence records
+        conv_df = conv_df.groupby("algo", as_index=False)["convergence_step"].mean()
+        conv_mean_col = "convergence_step"
+
+    color_map = {
+        "PPO": "#2ca02c",
+        "BC-RL": "#ff7f0e",
+        "SKC-PPO-F": "#1f77b4",
+        "SKC-PPO": "#9467bd",
+    }
+    order = [spec.name for spec in ALGO_SPECS]
+
+    fig, ax = plt.subplots(figsize=(11.5, 7.0))
+    note_lines = []
+
+    for algo in order:
+        sub = df[df["algo"] == algo].copy()
+        pivot = sub.pivot(index="step", columns="seed", values="reward").sort_index()
+        x = pivot.index.to_numpy()
+        curves = pivot.to_numpy().T
+        mean = curves.mean(axis=0)
+        std = curves.std(axis=0, ddof=0)
+        c = color_map[algo]
+
+        for curve in curves:
+            ax.plot(x, curve, color=c, alpha=0.18, linewidth=1.0)
+        ax.plot(x, mean, color=c, linewidth=2.6, label=algo)
+        ax.fill_between(x, mean - std, mean + std, color=c, alpha=0.14)
+
+        # theta = 0.95 * final_mean, final_mean computed from last 32 eval points in csv
+        last_steps = np.sort(sub["step"].unique())[-TAIL_POINTS:]
+        final_mean = float(sub[sub["step"].isin(last_steps)]["reward"].mean())
+        theta = 0.95 * final_mean
+        ax.axhline(theta, color=c, linestyle="--", linewidth=1.1, alpha=0.35)
+
+        conv_row = conv_df[conv_df["algo"] == algo]
+        if len(conv_row) == 0:
+            continue
+        conv_mean = float(conv_row.iloc[0][conv_mean_col])
+
+        # If too cluttered: only show SKC-PPO vertical line, others in annotation box.
+        if algo == "SKC-PPO":
+            ax.axvline(conv_mean, color=c, linestyle="--", linewidth=1.5, alpha=0.7)
+            ymax = ax.get_ylim()[1]
+            ax.text(
+                conv_mean,
+                ymax * 0.97,
+                f"Conv={conv_mean / 1e6:.2f}M",
+                color=c,
+                ha="center",
+                va="top",
+                fontsize=11,
+                rotation=90,
+                bbox=dict(boxstyle="round,pad=0.2", fc="white", ec=c, alpha=0.85),
+            )
+        else:
+            note_lines.append(f"{algo}: Conv={conv_mean / 1e6:.2f}M")
+
+    if note_lines:
+        ax.text(
+            0.985,
+            0.98,
+            "\n".join(note_lines),
+            transform=ax.transAxes,
+            ha="right",
+            va="top",
+            fontsize=11,
+            bbox=dict(boxstyle="round", facecolor="white", alpha=0.82, edgecolor="#999999"),
+        )
+
+    ax.set_xlim(0, TOTAL_STEPS)
+    ax.set_xlabel("Step", fontsize=13)
+    ax.set_ylabel("Reward", fontsize=13)
+    ax.set_title("Training Reward Curves with Convergence Cues", fontsize=15)
+    ax.tick_params(axis="both", labelsize=11)
+    ax.grid(alpha=0.25)
+    ax.legend(frameon=False, fontsize=11, loc="lower right")
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=260)
+    plt.close(fig)
+
 def main() -> None:
     rng = np.random.default_rng(RNG_SEED)
     steps = np.arange(0, TOTAL_STEPS + EVAL_INTERVAL, EVAL_INTERVAL, dtype=np.int64)
@@ -284,9 +381,16 @@ def main() -> None:
     )
     summary_df.to_csv("convergence_steps.csv", index=False)
 
+    plot_reward_with_convergence(
+        rewards_csv="mock_rewards.csv",
+        convergence_csv="convergence_steps.csv",
+        output_path="fig_reward_curves_with_convergence.png",
+    )
+
     print("Saved files:")
     print("  - mock_rewards.csv")
     print("  - fig_reward_curves.png")
+    print("  - fig_reward_curves_with_convergence.png")
     print("  - convergence_steps.csv")
     print("  - last1m_seed_stats.csv")
 
