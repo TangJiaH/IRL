@@ -187,8 +187,8 @@ def plot_reward_with_convergence(
     }
     order = [spec.name for spec in ALGO_SPECS]
 
-    fig, ax = plt.subplots(figsize=(11.5, 8.2))
-    note_lines = ["收敛步数（0.95·μ_final，N=5）："]
+    fig, ax = plt.subplots(figsize=(11.5, 7.0))
+    note_lines = ["收敛步数（0.95·μ_{final}，N=5）："]
 
     for algo in order:
         sub = df[df["algo"] == algo].copy()
@@ -216,7 +216,7 @@ def plot_reward_with_convergence(
         conv_mean = float(conv_row.iloc[0][conv_mean_col])
 
         ax.axvline(conv_mean, color=c, linestyle="--", linewidth=1.4, alpha=0.65)
-        note_lines.append(f"{algo}：{conv_mean / 1e6:.2f}×10^6")
+        note_lines.append(f"{algo}：{conv_mean / 1e6:.2f}×10$^6$")
 
     ax.text(
         0.985,
@@ -230,6 +230,8 @@ def plot_reward_with_convergence(
     )
 
     ax.set_xlim(0, TOTAL_STEPS)
+    y_min, y_max = ax.get_ylim()
+    ax.set_ylim(y_min, y_max + (y_max - y_min) * 0.12)
     ax.set_xlabel("环境交互步数", fontsize=13)
     ax.set_ylabel("平均回合奖励", fontsize=13)
     ax.set_title("训练奖励曲线及收敛步数对比", fontsize=15)
