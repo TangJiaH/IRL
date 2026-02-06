@@ -40,20 +40,60 @@ def main():
 
     fig, ax = plt.subplots(figsize=(7.5, 7.5), subplot_kw=dict(polar=True))
 
+    style_map = {
+        "SKC-PPO": {
+            "color": "#1b3a6b",
+            "lw": 3.2,
+            "alpha": 0.95,
+            "fill_alpha": 0.18,
+            "zorder": 5,
+        },
+        "SKC-PPO-F": {
+            "color": "#2b5b9a",
+            "lw": 2.2,
+            "alpha": 0.85,
+            "fill_alpha": 0.10,
+            "zorder": 4,
+        },
+    }
+    background_style = {
+        "color": "#7aa0c4",
+        "lw": 1.2,
+        "alpha": 0.30,
+        "zorder": 2,
+    }
+
     for idx, name in enumerate(algorithms):
-        values = normalized[idx]
-        values = np.concatenate([values, values[:1]])
-        if name == "SKC-PPO":
-            ax.plot(angles, values, linewidth=2.6, alpha=0.9, label=name)
-        else:
-            ax.plot(angles, values, linewidth=1.4, alpha=0.55, label=name)
+        values = np.concatenate([normalized[idx], normalized[idx][:1]])
+        style = style_map.get(name, background_style)
+        ax.plot(
+            angles,
+            values,
+            linewidth=style["lw"],
+            alpha=style["alpha"],
+            color=style["color"],
+            label=name,
+            zorder=style["zorder"],
+        )
+        if name in style_map:
+            ax.fill(angles, values, color=style["color"], alpha=style["fill_alpha"], zorder=style["zorder"] - 1)
 
     ax.set_xticks(angles[:-1])
-    ax.set_xticklabels(labels)
+    ax.set_xticklabels(labels, fontsize=12)
     ax.set_ylim(0, 1)
-    ax.set_title("各算法综合性能雷达图（归一化）", pad=20)
-    ax.legend(loc="upper right", bbox_to_anchor=(1.25, 1.1))
+    ax.set_yticks([0.2, 0.4, 0.6, 0.8, 1.0])
+    ax.set_yticklabels(["0.2", "0.4", "0.6", "0.8", "1.0"], fontsize=9)
+    ax.grid(True, alpha=0.25)
+    ax.set_title("各算法综合性能雷达图（归一化）", pad=20, fontsize=16)
+    ax.legend(
+        loc="upper left",
+        bbox_to_anchor=(1.15, 1.05),
+        fontsize=11,
+        frameon=True,
+        framealpha=0.85,
+    )
 
+    plt.subplots_adjust(right=0.78)
     fig.tight_layout()
     fig.savefig("fig_radar_performance.pdf", dpi=260)
     fig.savefig("fig_radar_performance.png", dpi=260)
