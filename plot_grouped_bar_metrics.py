@@ -35,45 +35,56 @@ def main():
     ylabels = ["调节步长", "稳态绝对误差", "控制量总变差", "平均回合奖励"]
 
     x = np.arange(len(algorithms))
-    base_color = "#a6bddb"
-    highlight_color = "#1b3a6b"
+    color_map = {
+        "PID": "#9aa0a6",
+        "BC": "#c7c7c7",
+        "PPO": "#4CAF50",
+        "BC-RL": "#FF9800",
+        "SKC-PPO-F": "#1E88E5",
+        "SKC-PPO": "#8E24AA",
+    }
+    error_kw = {"elinewidth": 1.0, "capsize": 3, "capthick": 1.0, "ecolor": "black"}
 
-    for ax, title, ylabel, metric_name in zip(axes, titles, ylabels, metrics.keys()):
+    for plot_idx, (ax, title, ylabel, metric_name) in enumerate(
+        zip(axes, titles, ylabels, metrics.keys())
+    ):
         means = np.array(metrics[metric_name]["mean"], dtype=float)
         stds = np.array(metrics[metric_name]["std"], dtype=float)
-        colors = [base_color] * len(algorithms)
-        colors[-1] = highlight_color
-
         bars = ax.bar(
             x,
             means,
             yerr=stds,
-            capsize=3,
-            error_kw={"ecolor": "black", "elinewidth": 1.2},
-            color=colors,
-            edgecolor="black",
-            linewidth=1.1,
+            error_kw=error_kw,
+            color=[color_map[algo] for algo in algorithms],
+            edgecolor="none",
+            linewidth=0.6,
         )
 
         for idx, bar in enumerate(bars):
             if algorithms[idx] == "SKC-PPO":
-                bar.set_linewidth(1.4)
+                bar.set_edgecolor("black")
+                bar.set_linewidth(1.2)
+            if plot_idx == 0:
+                bar.set_label(algorithms[idx])
 
         ax.set_title(title)
         ax.set_xlabel("算法")
         ax.set_ylabel(ylabel)
         ax.set_xticks(x)
         ax.set_xticklabels(algorithms, rotation=20)
-        ax.grid(axis="y", alpha=0.3)
-
-    handles = [
-        plt.Rectangle((0, 0), 1, 1, color=base_color, ec="black", lw=1.1),
-        plt.Rectangle((0, 0), 1, 1, color=highlight_color, ec="black", lw=1.3),
-    ]
-    fig.legend(handles, ["其他算法", "SKC-PPO"], loc="upper center", ncol=2, frameon=False)
+        ax.grid(axis="y", linestyle="--", alpha=0.3)
 
     fig.suptitle("各算法在独立测试集上的性能指标对比", y=0.98)
-    fig.tight_layout(rect=[0, 0, 1, 0.93])
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(
+        handles,
+        labels,
+        loc="upper center",
+        ncol=6,
+        frameon=False,
+        bbox_to_anchor=(0.5, 1.02),
+    )
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
 
     fig.savefig("fig_grouped_bar_metrics.png", dpi=260)
     fig.savefig("fig_grouped_bar_metrics.pdf", dpi=260)
