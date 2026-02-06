@@ -184,7 +184,7 @@ def plot_reward_with_convergence(
     order = [spec.name for spec in ALGO_SPECS]
 
     fig, ax = plt.subplots(figsize=(11.5, 7.0))
-    note_lines = []
+    note_lines = ["收敛步数（0.95·μ_final，N=5）："]
 
     for algo in order:
         sub = df[df["algo"] == algo].copy()
@@ -211,40 +211,24 @@ def plot_reward_with_convergence(
             continue
         conv_mean = float(conv_row.iloc[0][conv_mean_col])
 
-        # If too cluttered: only show SKC-PPO vertical line, others in annotation box.
-        if algo == "SKC-PPO":
-            ax.axvline(conv_mean, color=c, linestyle="--", linewidth=1.5, alpha=0.7)
-            ymax = ax.get_ylim()[1]
-            ax.text(
-                conv_mean,
-                ymax * 0.97,
-                f"Conv={conv_mean / 1e6:.2f}M",
-                color=c,
-                ha="center",
-                va="top",
-                fontsize=11,
-                rotation=90,
-                bbox=dict(boxstyle="round,pad=0.2", fc="white", ec=c, alpha=0.85),
-            )
-        else:
-            note_lines.append(f"{algo}: Conv={conv_mean / 1e6:.2f}M")
+        ax.axvline(conv_mean, color=c, linestyle="--", linewidth=1.4, alpha=0.65)
+        note_lines.append(f"{algo}：{conv_mean / 1e6:.2f}×10⁶")
 
-    if note_lines:
-        ax.text(
-            0.985,
-            0.98,
-            "\n".join(note_lines),
-            transform=ax.transAxes,
-            ha="right",
-            va="top",
-            fontsize=11,
-            bbox=dict(boxstyle="round", facecolor="white", alpha=0.82, edgecolor="#999999"),
-        )
+    ax.text(
+        0.985,
+        0.98,
+        "\n".join(note_lines),
+        transform=ax.transAxes,
+        ha="right",
+        va="top",
+        fontsize=11,
+        bbox=dict(boxstyle="round", facecolor="white", alpha=0.82, edgecolor="#999999"),
+    )
 
     ax.set_xlim(0, TOTAL_STEPS)
-    ax.set_xlabel("Step", fontsize=13)
-    ax.set_ylabel("Reward", fontsize=13)
-    ax.set_title("Training Reward Curves with Convergence Cues", fontsize=15)
+    ax.set_xlabel("环境交互步数", fontsize=13)
+    ax.set_ylabel("平均回合奖励", fontsize=13)
+    ax.set_title("训练奖励曲线及收敛步数对比", fontsize=15)
     ax.tick_params(axis="both", labelsize=11)
     ax.grid(alpha=0.25)
     ax.legend(frameon=False, fontsize=11, loc="lower right")
