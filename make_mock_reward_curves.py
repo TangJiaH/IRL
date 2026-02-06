@@ -187,7 +187,7 @@ def plot_reward_with_convergence(
     }
     order = [spec.name for spec in ALGO_SPECS]
 
-    fig, ax = plt.subplots(figsize=(11, 8))
+    fig, ax = plt.subplots(figsize=(11.5, 8.2))
     note_lines = ["收敛步数（0.95·μ_final，N=5）："]
 
     for algo in order:
@@ -216,14 +216,14 @@ def plot_reward_with_convergence(
         conv_mean = float(conv_row.iloc[0][conv_mean_col])
 
         ax.axvline(conv_mean, color=c, linestyle="--", linewidth=1.4, alpha=0.65)
-        note_lines.append(f"{algo}：{conv_mean / 1e6:.2f}×10⁶")
+        note_lines.append(f"{algo}：{conv_mean / 1e6:.2f}×10^6")
 
     ax.text(
-        1.02,
+        0.985,
         0.98,
         "\n".join(note_lines),
         transform=ax.transAxes,
-        ha="left",
+        ha="right",
         va="top",
         fontsize=10,
         bbox=dict(boxstyle="round", facecolor="white", alpha=0.9, edgecolor="#999999"),
@@ -236,7 +236,6 @@ def plot_reward_with_convergence(
     ax.tick_params(axis="both", labelsize=11)
     ax.grid(alpha=0.25)
     ax.legend(frameon=False, fontsize=11, loc="lower right")
-    plt.subplots_adjust(right=0.78)
     fig.tight_layout()
     fig.savefig(output_path, dpi=260)
     plt.close(fig)
