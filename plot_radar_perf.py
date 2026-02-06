@@ -40,43 +40,51 @@ def main():
 
     fig, ax = plt.subplots(figsize=(7.5, 7.5), subplot_kw=dict(polar=True))
 
-    style_map = {
-        "SKC-PPO": {
-            "color": "#1b3a6b",
-            "lw": 3.2,
-            "alpha": 0.95,
-            "fill_alpha": 0.18,
-            "zorder": 5,
-        },
-        "SKC-PPO-F": {
-            "color": "#2b5b9a",
-            "lw": 2.2,
-            "alpha": 0.85,
-            "fill_alpha": 0.10,
-            "zorder": 4,
-        },
-    }
-    background_style = {
-        "color": "#7aa0c4",
-        "lw": 1.2,
-        "alpha": 0.30,
-        "zorder": 2,
+    background_colors = {
+        "PID": "#9ecae1",
+        "BC": "#fdd0a2",
+        "PPO": "#c7e9c0",
+        "BC-RL": "#fcbba1",
     }
 
     for idx, name in enumerate(algorithms):
-        values = np.concatenate([normalized[idx], normalized[idx][:1]])
-        style = style_map.get(name, background_style)
-        ax.plot(
-            angles,
-            values,
-            linewidth=style["lw"],
-            alpha=style["alpha"],
-            color=style["color"],
-            label=name,
-            zorder=style["zorder"],
-        )
-        if name in style_map:
-            ax.fill(angles, values, color=style["color"], alpha=style["fill_alpha"], zorder=style["zorder"] - 1)
+        if name in background_colors:
+            values = np.concatenate([normalized[idx], normalized[idx][:1]])
+            ax.plot(
+                angles,
+                values,
+                color=background_colors[name],
+                linewidth=1.0,
+                alpha=0.20,
+                zorder=1,
+                label=name,
+            )
+
+    idx = algorithms.index("SKC-PPO-F")
+    values = np.concatenate([normalized[idx], normalized[idx][:1]])
+    ax.plot(
+        angles,
+        values,
+        color="#2b5b9a",
+        linewidth=2.2,
+        alpha=0.85,
+        zorder=4,
+        label="SKC-PPO-F",
+    )
+    ax.fill(angles, values, color="#2b5b9a", alpha=0.10, zorder=3)
+
+    idx = algorithms.index("SKC-PPO")
+    values = np.concatenate([normalized[idx], normalized[idx][:1]])
+    ax.plot(
+        angles,
+        values,
+        color="#1b3a6b",
+        linewidth=3.2,
+        alpha=0.95,
+        zorder=6,
+        label="SKC-PPO",
+    )
+    ax.fill(angles, values, color="#1b3a6b", alpha=0.18, zorder=5)
 
     ax.set_xticks(angles[:-1])
     ax.set_xticklabels(labels, fontsize=12)
