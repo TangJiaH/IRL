@@ -7,9 +7,13 @@ import math
 from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
+from matplotlib import rcParams
 import numpy as np
 import pandas as pd
 
+# ===== 中文字体与符号支持 =====
+rcParams["font.sans-serif"] = ["SimHei"]
+rcParams["axes.unicode_minus"] = False
 
 EVAL_INTERVAL = 32_000
 TOTAL_STEPS = 20_000_000
@@ -183,7 +187,7 @@ def plot_reward_with_convergence(
     }
     order = [spec.name for spec in ALGO_SPECS]
 
-    fig, ax = plt.subplots(figsize=(11.5, 7.0))
+    fig, ax = plt.subplots(figsize=(11, 8))
     note_lines = ["收敛步数（0.95·μ_final，N=5）："]
 
     for algo in order:
@@ -215,14 +219,14 @@ def plot_reward_with_convergence(
         note_lines.append(f"{algo}：{conv_mean / 1e6:.2f}×10⁶")
 
     ax.text(
-        0.985,
+        1.02,
         0.98,
         "\n".join(note_lines),
         transform=ax.transAxes,
-        ha="right",
+        ha="left",
         va="top",
-        fontsize=11,
-        bbox=dict(boxstyle="round", facecolor="white", alpha=0.82, edgecolor="#999999"),
+        fontsize=10,
+        bbox=dict(boxstyle="round", facecolor="white", alpha=0.9, edgecolor="#999999"),
     )
 
     ax.set_xlim(0, TOTAL_STEPS)
@@ -232,6 +236,7 @@ def plot_reward_with_convergence(
     ax.tick_params(axis="both", labelsize=11)
     ax.grid(alpha=0.25)
     ax.legend(frameon=False, fontsize=11, loc="lower right")
+    plt.subplots_adjust(right=0.78)
     fig.tight_layout()
     fig.savefig(output_path, dpi=260)
     plt.close(fig)
