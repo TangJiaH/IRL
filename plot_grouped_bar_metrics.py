@@ -27,6 +27,12 @@ def main():
 
     matplotlib.rcParams["font.sans-serif"] = ["SimHei", "Microsoft YaHei", "DejaVu Sans"]
     matplotlib.rcParams["axes.unicode_minus"] = False
+    matplotlib.rcParams["font.size"] = 12
+    matplotlib.rcParams["axes.titlesize"] = 14
+    matplotlib.rcParams["axes.labelsize"] = 12
+    matplotlib.rcParams["xtick.labelsize"] = 12
+    matplotlib.rcParams["ytick.labelsize"] = 12
+    matplotlib.rcParams["legend.fontsize"] = 14
 
     fig, axes = plt.subplots(2, 2, figsize=(12, 8))
     axes = axes.flatten()
@@ -74,7 +80,7 @@ def main():
         ax.set_xticklabels(algorithms, rotation=20)
         ax.grid(axis="y", linestyle="--", alpha=0.3)
 
-    fig.suptitle("各算法在独立测试集上的性能指标对比", y=0.98)
+    fig.suptitle("各算法在独立测试集上的性能指标对比", y=0.98, fontsize=14)
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(
         handles,
@@ -83,7 +89,7 @@ def main():
         ncol=6,
         frameon=False,
         bbox_to_anchor=(0.5, 0.955),
-        fontsize=12,
+        fontsize=14,
     )
     fig.tight_layout(rect=[0, 0, 1, 0.95])
 
