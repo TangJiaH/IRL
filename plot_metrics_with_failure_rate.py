@@ -42,22 +42,24 @@ def main():
 
     matplotlib.rcParams["font.sans-serif"] = ["SimHei", "Microsoft YaHei", "DejaVu Sans"]
     matplotlib.rcParams["axes.unicode_minus"] = False
-    matplotlib.rcParams["font.size"] = 12
-    matplotlib.rcParams["axes.titlesize"] = 14
-    matplotlib.rcParams["axes.labelsize"] = 12
-    matplotlib.rcParams["xtick.labelsize"] = 12
-    matplotlib.rcParams["ytick.labelsize"] = 12
-    matplotlib.rcParams["legend.fontsize"] = 12
+    matplotlib.rcParams["font.size"] = 14
+    matplotlib.rcParams["axes.titlesize"] = 16
+    matplotlib.rcParams["axes.labelsize"] = 14
+    matplotlib.rcParams["xtick.labelsize"] = 14
+    matplotlib.rcParams["ytick.labelsize"] = 14
+    matplotlib.rcParams["legend.fontsize"] = 16
 
-    fig = plt.figure(figsize=(14, 8))
-    gs = GridSpec(2, 3, figure=fig, wspace=0.25, hspace=0.35)
+    fig = plt.figure(figsize=(14, 9))
+    gs = GridSpec(2, 1, figure=fig, hspace=0.35)
+    top_gs = gs[0].subgridspec(1, 2, wspace=0.25)
+    bottom_gs = gs[1].subgridspec(1, 3, wspace=0.25)
 
     axes = [
-        fig.add_subplot(gs[0, 0]),
-        fig.add_subplot(gs[0, 2]),
-        fig.add_subplot(gs[1, 0]),
-        fig.add_subplot(gs[1, 1]),
-        fig.add_subplot(gs[1, 2]),
+        fig.add_subplot(top_gs[0, 0]),
+        fig.add_subplot(top_gs[0, 1]),
+        fig.add_subplot(bottom_gs[0, 0]),
+        fig.add_subplot(bottom_gs[0, 1]),
+        fig.add_subplot(bottom_gs[0, 2]),
     ]
 
     titles = [
@@ -122,7 +124,7 @@ def main():
     ax_failure.set_xticklabels(algorithms, rotation=20)
     ax_failure.grid(axis="y", linestyle="--", alpha=0.3)
 
-    fig.suptitle("各算法在独立测试集上的性能指标对比（含失败率）", y=0.98, fontsize=14)
+    fig.suptitle("各算法在独立测试集上的性能指标对比（含失败率）", y=0.98, fontsize=16)
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(
         handles,
@@ -130,10 +132,12 @@ def main():
         loc="upper center",
         ncol=6,
         frameon=False,
-        bbox_to_anchor=(0.5, 0.94),
-        fontsize=14,
+        bbox_to_anchor=(0.5, 0.93),
+        fontsize=16,
+        handlelength=2.0,
+        handleheight=1.2,
     )
-    fig.subplots_adjust(left=0.05, right=0.98, bottom=0.07, top=0.90)
+    fig.subplots_adjust(left=0.05, right=0.98, bottom=0.07, top=0.88)
 
     fig.savefig("fig_metrics_with_failure_rate.png", dpi=260)
     fig.savefig("fig_metrics_with_failure_rate.pdf", dpi=260)
