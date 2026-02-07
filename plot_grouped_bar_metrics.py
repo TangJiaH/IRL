@@ -82,7 +82,8 @@ def main():
         loc="upper center",
         ncol=6,
         frameon=False,
-        bbox_to_anchor=(0.5, 1.02),
+        bbox_to_anchor=(0.5, 0.955),
+        fontsize=12,
     )
     fig.tight_layout(rect=[0, 0, 1, 0.95])
 
