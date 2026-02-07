@@ -124,7 +124,7 @@ def main():
     ax_failure.set_xticklabels(algorithms, rotation=20)
     ax_failure.grid(axis="y", linestyle="--", alpha=0.3)
 
-    fig.suptitle("各算法在独立测试集上的性能指标对比（含失败率）", y=0.98, fontsize=16)
+    fig.suptitle("各算法在独立测试集上的性能指标对比（含失败率）", y=0.99, fontsize=16)
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(
         handles,
@@ -132,12 +132,12 @@ def main():
         loc="upper center",
         ncol=6,
         frameon=False,
-        bbox_to_anchor=(0.5, 0.93),
+        bbox_to_anchor=(0.5, 0.955),
         fontsize=16,
         handlelength=2.0,
         handleheight=1.2,
     )
-    fig.subplots_adjust(left=0.05, right=0.98, bottom=0.07, top=0.88)
+    fig.subplots_adjust(left=0.05, right=0.98, bottom=0.07, top=0.85)
 
     fig.savefig("fig_metrics_with_failure_rate.png", dpi=260)
     fig.savefig("fig_metrics_with_failure_rate.pdf", dpi=260)
