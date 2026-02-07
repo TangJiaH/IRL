@@ -42,13 +42,19 @@ def main():
 
     matplotlib.rcParams["font.sans-serif"] = ["SimHei", "Microsoft YaHei", "DejaVu Sans"]
     matplotlib.rcParams["axes.unicode_minus"] = False
+    matplotlib.rcParams["font.size"] = 12
+    matplotlib.rcParams["axes.titlesize"] = 14
+    matplotlib.rcParams["axes.labelsize"] = 12
+    matplotlib.rcParams["xtick.labelsize"] = 12
+    matplotlib.rcParams["ytick.labelsize"] = 12
+    matplotlib.rcParams["legend.fontsize"] = 12
 
     fig = plt.figure(figsize=(14, 8))
     gs = GridSpec(2, 3, figure=fig, wspace=0.25, hspace=0.35)
 
     axes = [
         fig.add_subplot(gs[0, 0]),
-        fig.add_subplot(gs[0, 1]),
+        fig.add_subplot(gs[0, 2]),
         fig.add_subplot(gs[1, 0]),
         fig.add_subplot(gs[1, 1]),
         fig.add_subplot(gs[1, 2]),
@@ -116,7 +122,7 @@ def main():
     ax_failure.set_xticklabels(algorithms, rotation=20)
     ax_failure.grid(axis="y", linestyle="--", alpha=0.3)
 
-    fig.suptitle("各算法在独立测试集上的性能指标对比（含失败率）", y=0.98)
+    fig.suptitle("各算法在独立测试集上的性能指标对比（含失败率）", y=0.98, fontsize=14)
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(
         handles,
@@ -125,8 +131,9 @@ def main():
         ncol=6,
         frameon=False,
         bbox_to_anchor=(0.5, 0.94),
+        fontsize=14,
     )
-    fig.tight_layout(rect=[0, 0, 1, 0.93])
+    fig.subplots_adjust(left=0.05, right=0.98, bottom=0.07, top=0.90)
 
     fig.savefig("fig_metrics_with_failure_rate.png", dpi=260)
     fig.savefig("fig_metrics_with_failure_rate.pdf", dpi=260)
