@@ -27,9 +27,6 @@ def main():
     }
 
     failure_mean = np.array([6.8, 9.5, 14.2, 8.1, 4.3, 2.1], dtype=float)
-    n_trials = 1000
-    p = failure_mean / 100.0
-    failure_std = 100.0 * np.sqrt(p * (1 - p) / n_trials)
 
     color_map = {
         "PID": "#9aa0a6",
@@ -108,8 +105,6 @@ def main():
     bars = ax_failure.bar(
         x,
         failure_mean,
-        yerr=failure_std,
-        error_kw=error_kw,
         color=[color_map[algo] for algo in algorithms],
         edgecolor="none",
         linewidth=0.6,
@@ -141,9 +136,6 @@ def main():
 
     fig.savefig("fig_metrics_with_failure_rate.png", dpi=260)
     fig.savefig("fig_metrics_with_failure_rate.pdf", dpi=260)
-
-    formatted = ", ".join(f"{val:.3f}" for val in failure_std)
-    print(f"失败率标准差: {formatted}")
 
 
 if __name__ == "__main__":
