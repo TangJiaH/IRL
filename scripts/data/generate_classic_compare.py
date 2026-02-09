@@ -24,17 +24,29 @@ class AlgoProfile:
     sign_damping: float = 1.0
 
 
+DEFAULTS = {
+    "output_dir": "generated_acmi",
+    "episodes": 1,
+    "steps": 1000,
+    "dt": 0.2,
+    "seed": 1,
+    "target_interval": 200,
+    "env_config": "1/heading",
+    "altitude_buffer": 200.0,
+}
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="经典目标序列六算法轨迹对比生成器（ACMI + CSV）。")
-    parser.add_argument("--output-dir", type=str, default="generated_acmi",
+    parser.add_argument("--output-dir", type=str, default=DEFAULTS["output_dir"],
                         help="输出目录。")
-    parser.add_argument("--episodes", type=int, default=1,
+    parser.add_argument("--episodes", type=int, default=DEFAULTS["episodes"],
                         help="生成的轨迹数量。")
-    parser.add_argument("--steps", type=int, default=1000,
+    parser.add_argument("--steps", type=int, default=DEFAULTS["steps"],
                         help="每条轨迹步数。")
-    parser.add_argument("--dt", type=float, default=0.2,
+    parser.add_argument("--dt", type=float, default=DEFAULTS["dt"],
                         help="时间步长（秒）。")
-    parser.add_argument("--seed", type=int, default=1,
+    parser.add_argument("--seed", type=int, default=DEFAULTS["seed"],
                         help="随机种子。")
     parser.add_argument("--lat-range", type=float, nargs=2, default=[59.8, 60.2],
                         help="纬度范围（度）。")
@@ -48,7 +60,7 @@ def parse_args() -> argparse.Namespace:
                         help="目标高度范围（英尺）。")
     parser.add_argument("--target-speed-range", type=float, nargs=2, default=[400.0, 1200.0],
                         help="目标速度范围（英尺/秒）。")
-    parser.add_argument("--target-interval", type=int, default=200,
+    parser.add_argument("--target-interval", type=int, default=DEFAULTS["target_interval"],
                         help="目标刷新间隔（步）。")
     parser.add_argument("--heading-eps", type=float, default=5.0,
                         help="航向误差阈值（度）。")
@@ -56,9 +68,9 @@ def parse_args() -> argparse.Namespace:
                         help="高度误差阈值（米）。")
     parser.add_argument("--speed-eps", type=float, default=2.0,
                         help="速度误差阈值（米/秒）。")
-    parser.add_argument("--env-config", type=str, default="1/heading",
+    parser.add_argument("--env-config", type=str, default=DEFAULTS["env_config"],
                         help="JSBSim 配置名（用于读取终止条件阈值）。")
-    parser.add_argument("--altitude-buffer", type=float, default=200.0,
+    parser.add_argument("--altitude-buffer", type=float, default=DEFAULTS["altitude_buffer"],
                         help="低空终止高度的安全缓冲（米）。")
     parser.add_argument("--algos", type=str, nargs="*",
                         default=["PID", "BC", "PPO", "BC-RL", "SKC-PPO-F", "SKC-PPO"],
