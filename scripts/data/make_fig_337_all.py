@@ -10,6 +10,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import yaml
 
+from envs.JSBSim.utils.utils import LLA2NEU
+
 
 COLOR_MAP = {
     "PID": "#9aa0a6",
@@ -19,6 +21,9 @@ COLOR_MAP = {
     "SKC-PPO-F": "#1E88E5",
     "SKC-PPO": "#8E24AA",
 }
+
+
+BATTLE_FIELD_CENTER = (120.0, 60.0, 0.0)  # (longitude, latitude, altitude)
 
 
 LINE_STYLE = {
@@ -161,6 +166,33 @@ def infer_xy_units(series: Dict[str, Dict[str, np.ndarray]]) -> Tuple[str, str]:
     return "X (m)", "Y (m)"
 
 
+def build_plot_xyz(
+    data: Dict[str, np.ndarray],
+    origin: Tuple[float, float, float] | None,
+) -> Tuple[np.ndarray | None, np.ndarray | None, np.ndarray | None]:
+    x = data.get("x")
+    y = data.get("y")
+    z = data.get("z")
+    if x is not None and y is not None and z is not None:
+        return x, y, z
+
+    lon = data.get("lon")
+    lat = data.get("lat")
+    alt = data.get("alt_m")
+    if lon is None or lat is None or alt is None:
+        return None, None, None
+
+    if origin is None:
+        origin = BATTLE_FIELD_CENTER
+    lon0, lat0, alt0 = origin
+
+    neu = np.array(
+        [LLA2NEU(float(lon[i]), float(lat[i]), float(alt[i]), lon0, lat0, alt0) for i in range(len(lon))],
+        dtype=float,
+    )
+    return neu[:, 0], neu[:, 1], neu[:, 2]
+
+
 def save_figure(fig: plt.Figure, outdir: str, basename: str) -> None:
     path_png = os.path.join(outdir, f"{basename}.png")
     path_pdf = os.path.join(outdir, f"{basename}.pdf")
@@ -170,17 +202,25 @@ def save_figure(fig: plt.Figure, outdir: str, basename: str) -> None:
 
 def plot_traj3d(series: Dict[str, Dict[str, np.ndarray]], algo_list: List[str], outdir: str) -> None:
     fig = plt.figure(figsize=(8.6, 8.4))
-    gs = fig.add_gridspec(2, 1, hspace=0.3)
+    gs = fig.add_gridspec(2, 1, hspace=0.3, height_ratios=[1.35, 1.0])
     ax = fig.add_subplot(gs[0, 0], projection="3d")
     ax2 = fig.add_subplot(gs[1, 0])
 
     x_label, y_label = infer_xy_units(series)
+    origin = None
+    for algo in algo_list:
+        data = series.get(algo, {})
+        lon = data.get("lon")
+        lat = data.get("lat")
+        alt = data.get("alt_m")
+        if lon is not None and lat is not None and alt is not None and len(lon) > 0:
+            origin = BATTLE_FIELD_CENTER
+            x_label, y_label = "北向 N (m)", "东向 E (m)"
+            break
 
     for algo in algo_list:
         data = series.get(algo, {})
-        x = data.get("x") or data.get("lon")
-        y = data.get("y") or data.get("lat")
-        z = data.get("z") or data.get("alt_m")
+        x, y, z = build_plot_xyz(data, origin)
         if x is None or y is None or z is None:
             continue
         style = _get_style(algo)
@@ -196,6 +236,16 @@ def plot_traj3d(series: Dict[str, Dict[str, np.ndarray]], algo_list: List[str], 
     ax2.set_aspect("equal", adjustable="box")
 
     add_fig_legend_unique(fig, ax, ncol=4, y=1.03)
+    if origin is not None:
+        lon0, lat0, alt0 = origin
+        fig.text(
+            0.5,
+            1.075,
+            f"原点 (lon, lat, alt) = ({lon0:.6f}°, {lat0:.6f}°, {alt0:.1f} m)",
+            ha="center",
+            va="bottom",
+            fontsize=10,
+        )
     fig.subplots_adjust(top=0.88, hspace=0.3)
     save_figure(fig, outdir, "fig_337_traj3d")
     plt.close(fig)
