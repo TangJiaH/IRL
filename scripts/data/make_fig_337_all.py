@@ -23,6 +23,9 @@ COLOR_MAP = {
 }
 
 
+BATTLE_FIELD_CENTER = (120.0, 60.0, 0.0)  # (longitude, latitude, altitude)
+
+
 LINE_STYLE = {
     "SKC-PPO": {"lw": 2.6, "alpha": 0.95},
     "SKC-PPO-F": {"lw": 2.1, "alpha": 0.85},
@@ -180,7 +183,7 @@ def build_plot_xyz(
         return None, None, None
 
     if origin is None:
-        origin = (float(lon[0]), float(lat[0]), float(alt[0]))
+        origin = BATTLE_FIELD_CENTER
     lon0, lat0, alt0 = origin
 
     neu = np.array(
@@ -211,7 +214,7 @@ def plot_traj3d(series: Dict[str, Dict[str, np.ndarray]], algo_list: List[str], 
         lat = data.get("lat")
         alt = data.get("alt_m")
         if lon is not None and lat is not None and alt is not None and len(lon) > 0:
-            origin = (float(lon[0]), float(lat[0]), float(alt[0]))
+            origin = BATTLE_FIELD_CENTER
             x_label, y_label = "北向 N (m)", "东向 E (m)"
             break
 
