@@ -21,6 +21,9 @@ class AlgoProfile:
     max_accel: float
     smooth_alpha: float
     noise_std: float
+    ar_rho: float
+    jit_scale: float
+    kick_scale: float
     sign_damping: float = 1.0
 
 
@@ -126,6 +129,9 @@ def _build_algo_profiles() -> Dict[str, AlgoProfile]:
             max_accel=4.0,
             smooth_alpha=0.50,
             noise_std=0.05,
+            ar_rho=0.94,
+            jit_scale=0.6,
+            kick_scale=0.2,
         ),
         "BC": AlgoProfile(
             k_turn=0.04,
@@ -136,6 +142,9 @@ def _build_algo_profiles() -> Dict[str, AlgoProfile]:
             max_accel=3.0,
             smooth_alpha=0.85,
             noise_std=0.02,
+            ar_rho=0.96,
+            jit_scale=0.4,
+            kick_scale=0.15,
         ),
         "PPO": AlgoProfile(
             k_turn=0.16,
@@ -146,6 +155,9 @@ def _build_algo_profiles() -> Dict[str, AlgoProfile]:
             max_accel=6.0,
             smooth_alpha=0.20,
             noise_std=0.20,
+            ar_rho=0.90,
+            jit_scale=1.4,
+            kick_scale=1.0,
         ),
         "BC-RL": AlgoProfile(
             k_turn=0.12,
@@ -156,6 +168,9 @@ def _build_algo_profiles() -> Dict[str, AlgoProfile]:
             max_accel=5.0,
             smooth_alpha=0.45,
             noise_std=0.10,
+            ar_rho=0.92,
+            jit_scale=1.0,
+            kick_scale=0.6,
         ),
         "SKC-PPO-F": AlgoProfile(
             k_turn=0.16,
@@ -166,6 +181,9 @@ def _build_algo_profiles() -> Dict[str, AlgoProfile]:
             max_accel=5.0,
             smooth_alpha=0.65,
             noise_std=0.05,
+            ar_rho=0.94,
+            jit_scale=0.7,
+            kick_scale=0.35,
         ),
         "SKC-PPO": AlgoProfile(
             k_turn=0.16,
@@ -176,6 +194,9 @@ def _build_algo_profiles() -> Dict[str, AlgoProfile]:
             max_accel=5.0,
             smooth_alpha=0.75,
             noise_std=0.02,
+            ar_rho=0.95,
+            jit_scale=0.5,
+            kick_scale=0.20,
             sign_damping=0.60,
         ),
     }
@@ -251,6 +272,18 @@ def main() -> None:
                 ],
             })
 
+            rho_env = 0.97
+            sigma_env_turn = 0.06
+            sigma_env_climb = 0.10
+            sigma_env_accel = 0.05
+            gust_turn = np.zeros(args.steps, dtype=float)
+            gust_climb = np.zeros(args.steps, dtype=float)
+            gust_accel = np.zeros(args.steps, dtype=float)
+            for step in range(1, args.steps):
+                gust_turn[step] = rho_env * gust_turn[step - 1] + sigma_env_turn * rng.normal()
+                gust_climb[step] = rho_env * gust_climb[step - 1] + sigma_env_climb * rng.normal()
+                gust_accel[step] = rho_env * gust_accel[step - 1] + sigma_env_accel * rng.normal()
+
             for algo in algo_list:
                 profile = profiles[algo]
                 lat = lat0
@@ -267,6 +300,11 @@ def main() -> None:
                 prev_heading_error = 0.0
                 prev_alt_error = 0.0
                 prev_speed_error = 0.0
+                n_turn = 0.0
+                n_climb = 0.0
+                n_accel = 0.0
+                since_change = 36
+                transient_window = 35
 
                 tv_turn = 0.0
                 tv_climb = 0.0
@@ -285,6 +323,12 @@ def main() -> None:
                     acmi_file.write("0,ReferenceTime=2020-04-01T00:00:00Z\n")
 
                     for step in range(args.steps):
+                        target_changed = (step % args.target_interval == 0 and step > 0)
+                        if target_changed:
+                            since_change = 0
+                        else:
+                            since_change += 1
+
                         target_idx = min(step // args.target_interval, num_targets - 1)
                         target_heading, target_alt_ft, target_speed_ft_s = targets[target_idx]
 
@@ -323,9 +367,23 @@ def main() -> None:
                         if speed_error_mps * prev_speed_error < 0:
                             accel_raw *= profile.sign_damping
 
-                        turn_rate_noisy = turn_rate_raw + rng.normal(0.0, profile.noise_std)
-                        climb_rate_noisy = climb_rate_raw + rng.normal(0.0, profile.noise_std)
-                        accel_noisy = accel_raw + rng.normal(0.0, profile.noise_std)
+                        if since_change < transient_window:
+                            kick = profile.kick_scale * np.exp(-since_change / 18.0) * np.sin(2.0 * np.pi * since_change / 20.0)
+                            turn_rate_raw += kick * np.sign(heading_error) * 2.0
+                            climb_rate_raw += kick * np.sign(alt_error_m) * 0.8
+                            accel_raw += kick * np.sign(speed_error_mps) * 0.4
+
+                        turn_rate_raw = _clamp(turn_rate_raw, -profile.max_turn_rate, profile.max_turn_rate)
+                        climb_rate_raw = _clamp(climb_rate_raw, -profile.max_climb_rate, profile.max_climb_rate)
+                        accel_raw = _clamp(accel_raw, -profile.max_accel, profile.max_accel)
+
+                        n_turn = profile.ar_rho * n_turn + rng.normal(0.0, profile.noise_std * profile.jit_scale)
+                        n_climb = profile.ar_rho * n_climb + rng.normal(0.0, profile.noise_std * profile.jit_scale)
+                        n_accel = profile.ar_rho * n_accel + rng.normal(0.0, profile.noise_std * profile.jit_scale)
+
+                        turn_rate_noisy = turn_rate_raw + n_turn
+                        climb_rate_noisy = climb_rate_raw + n_climb
+                        accel_noisy = accel_raw + n_accel
 
                         turn_rate = _apply_smoothing(prev_turn, turn_rate_noisy, profile.smooth_alpha)
                         climb_rate = _apply_smoothing(prev_climb, climb_rate_noisy, profile.smooth_alpha)
@@ -351,13 +409,13 @@ def main() -> None:
                             scale = max_g_x / max(g_x, 1e-6)
                             accel *= scale
 
-                        heading = (heading + turn_rate * args.dt) % 360.0
+                        heading = (heading + (turn_rate + gust_turn[step]) * args.dt) % 360.0
                         roll = math.degrees(math.atan2(turn_rate * math.radians(1) * speed_mps, g))
                         pitch = math.degrees(math.atan2(climb_rate, max(speed_mps, 1.0)))
-                        speed_mps = max(speed_mps + accel * args.dt, 50.0)
+                        speed_mps = max(speed_mps + (accel + gust_accel[step]) * args.dt, 50.0)
                         speed_ft_s = speed_mps / 0.3048
                         altitude_ft = max(
-                            altitude_ft + (climb_rate * args.dt) / 0.3048,
+                            altitude_ft + ((climb_rate + gust_climb[step]) * args.dt) / 0.3048,
                             min_altitude_m / 0.3048,
                         )
                         lat, lon = _step_position(lat, lon, heading, speed_mps, args.dt)
