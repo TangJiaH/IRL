@@ -237,11 +237,11 @@ def main() -> None:
     with open(compare_csv_path, "w", encoding="utf-8", newline="") as compare_file:
         writer = csv.writer(compare_file)
         # 新增加 alt_error_m 和 speed_error_mps 用于后续状态对比图表绘制，
-        # 它们分别表示当前高度和当前速度与对应目标高度/速度的绝对误差。
+        # 它们分别表示当前高度和当前速度与对应目标高度/速度的有符号误差。
         writer.writerow([
             "t", "step", "algo", "lat", "lon", "alt_m", "heading_deg",
-            "target_heading_deg", "heading_error_deg", "speed_mps",
-            "alt_error_m", "speed_error_mps",
+            "target_heading_deg", "target_alt_m", "target_speed_mps",
+            "heading_error_deg", "alt_error_m", "speed_mps", "speed_error_mps",
             "u_turn_rate", "u_climb_rate", "u_accel",
         ])
 
@@ -465,10 +465,12 @@ def main() -> None:
                             f"{altitude_ft * 0.3048:.2f}",
                             f"{heading:.3f}",
                             f"{target_heading:.3f}",
+                            f"{target_alt_m:.2f}",
+                            f"{target_speed_mps:.2f}",
                             f"{heading_error:.3f}",
+                            f"{alt_error_m:.2f}",  # signed
                             f"{speed_mps:.2f}",
-                            f"{abs(altitude_ft * 0.3048 - target_alt_m):.2f}",
-                            f"{abs(speed_mps - target_speed_mps):.2f}",
+                            f"{speed_error_mps:.2f}",  # signed
                             f"{turn_rate:.4f}",
                             f"{climb_rate:.4f}",
                             f"{accel:.4f}",
