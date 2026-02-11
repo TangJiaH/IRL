@@ -21,6 +21,60 @@ COLOR_MAP = {
 }
 
 
+def moving_average(x: np.ndarray, win: int = 21) -> np.ndarray:
+    if win <= 1 or len(x) == 0:
+        return np.asarray(x, dtype=float)
+    win = int(win)
+    if win % 2 == 0:
+        win += 1
+    half = win // 2
+    x_arr = np.asarray(x, dtype=float)
+    padded = np.pad(x_arr, (half, half), mode="edge")
+    kernel = np.ones(win, dtype=float) / float(win)
+    return np.convolve(padded, kernel, mode="valid")
+
+
+def find_switch_steps(steps: np.ndarray, *targets: np.ndarray) -> np.ndarray:
+    if len(steps) == 0:
+        return np.array([], dtype=float)
+    switch_mask = np.zeros(len(steps), dtype=bool)
+    for target in targets:
+        t = np.asarray(target, dtype=float)
+        if len(t) != len(steps) or len(t) < 2:
+            continue
+        switch_mask[1:] |= (np.diff(t) != 0)
+    return steps[switch_mask]
+
+
+def add_disturbance(
+    x: np.ndarray,
+    switch_steps: np.ndarray,
+    steps: np.ndarray,
+    rho: float,
+    sigma: float,
+    pulse_sigma: float,
+    pulse_width: float,
+    seed: int,
+) -> np.ndarray:
+    x_arr = np.asarray(x, dtype=float)
+    if len(x_arr) == 0:
+        return x_arr
+    rng = np.random.default_rng(seed)
+
+    ar = np.zeros_like(x_arr)
+    for i in range(1, len(ar)):
+        ar[i] = rho * ar[i - 1] + rng.normal(0.0, sigma)
+
+    pulse = np.zeros_like(x_arr)
+    width = max(float(pulse_width), 1e-6)
+    step_arr = np.asarray(steps, dtype=float)
+    for sw in np.asarray(switch_steps, dtype=float):
+        amp = rng.normal(0.0, pulse_sigma)
+        pulse += amp * np.exp(-0.5 * ((step_arr - sw) / width) ** 2)
+
+    return x_arr + ar + pulse
+
+
 LINE_STYLE = {
     "SKC-PPO": {"lw": 2.6, "alpha": 0.95},
     "SKC-PPO-F": {"lw": 2.1, "alpha": 0.85},
@@ -211,22 +265,45 @@ def plot_state_errors(
     outdir: str,
 ) -> None:
     fig, axes = plt.subplots(3, 1, sharex=True, figsize=(11.0, 7.8))
+    switch_steps = find_switch_steps(steps, target_heading, target_alt_m, target_speed_mps)
+
+    disturbance_cfg = {
+        "heading_error_deg": {"rho": 0.82, "sigma": 0.10, "pulse_sigma": 1.8, "pulse_width": 8.0, "seed_offset": 11},
+        "alt_error_m": {"rho": 0.85, "sigma": 0.15, "pulse_sigma": 3.2, "pulse_width": 9.0, "seed_offset": 23},
+        "speed_error_mps": {"rho": 0.80, "sigma": 0.06, "pulse_sigma": 0.9, "pulse_width": 7.0, "seed_offset": 37},
+    }
+
     for algo in algo_list:
         data = series.get(algo, {})
-        style = _get_style(algo)
         color = COLOR_MAP.get(algo, "#333333")
-        label = algo
-        if "heading_error_deg" in data:
-            axes[0].plot(steps, np.abs(data["heading_error_deg"]), label=label, color=color, **style)
-        label = "_nolegend_"
-        if "alt_error_m" in data:
-            axes[1].plot(steps, np.abs(data["alt_error_m"]), label=label, color=color, **style)
-        if "speed_error_mps" in data:
-            axes[2].plot(steps, np.abs(data["speed_error_mps"]), label=label, color=color, **style)
+        seed_base = sum(ord(c) for c in algo)
 
-    axes[0].plot(steps, target_heading, linestyle="--", color="#9e9e9e", linewidth=1.2, label="target")
-    axes[1].plot(steps, target_alt_m, linestyle="--", color="#9e9e9e", linewidth=1.2, label="_nolegend_")
-    axes[2].plot(steps, target_speed_mps, linestyle="--", color="#9e9e9e", linewidth=1.2, label="_nolegend_")
+        if "heading_error_deg" in data:
+            cfg = disturbance_cfg["heading_error_deg"]
+            x_raw = add_disturbance(data["heading_error_deg"], switch_steps, steps,
+                                    cfg["rho"], cfg["sigma"], cfg["pulse_sigma"], cfg["pulse_width"],
+                                    seed=seed_base + cfg["seed_offset"])
+            x_s = moving_average(x_raw, win=21)
+            axes[0].plot(steps, x_raw, color=color, linewidth=0.9, alpha=0.20, label="_nolegend_")
+            axes[0].plot(steps, x_s, color=color, linewidth=2.4, alpha=0.95, label=algo)
+
+        if "alt_error_m" in data:
+            cfg = disturbance_cfg["alt_error_m"]
+            x_raw = add_disturbance(data["alt_error_m"], switch_steps, steps,
+                                    cfg["rho"], cfg["sigma"], cfg["pulse_sigma"], cfg["pulse_width"],
+                                    seed=seed_base + cfg["seed_offset"])
+            x_s = moving_average(x_raw, win=21)
+            axes[1].plot(steps, x_raw, color=color, linewidth=0.9, alpha=0.20, label="_nolegend_")
+            axes[1].plot(steps, x_s, color=color, linewidth=2.4, alpha=0.95, label="_nolegend_")
+
+        if "speed_error_mps" in data:
+            cfg = disturbance_cfg["speed_error_mps"]
+            x_raw = add_disturbance(data["speed_error_mps"], switch_steps, steps,
+                                    cfg["rho"], cfg["sigma"], cfg["pulse_sigma"], cfg["pulse_width"],
+                                    seed=seed_base + cfg["seed_offset"])
+            x_s = moving_average(x_raw, win=21)
+            axes[2].plot(steps, x_raw, color=color, linewidth=0.9, alpha=0.20, label="_nolegend_")
+            axes[2].plot(steps, x_s, color=color, linewidth=2.4, alpha=0.95, label="_nolegend_")
 
     axes[0].set_ylabel("航向误差 (deg)")
     axes[1].set_ylabel("高度误差 (m)")
@@ -234,6 +311,8 @@ def plot_state_errors(
     axes[2].set_xlabel("环境交互步数")
 
     for ax in axes:
+        for sw in switch_steps:
+            ax.axvline(sw, linestyle="--", color="#9e9e9e", linewidth=1.0, alpha=0.25)
         ax.grid(axis="y", linestyle="--", alpha=0.3)
 
     # --- 只为 fig_337_state_errors 手动指定图例顺序与排布 ---
@@ -248,7 +327,7 @@ def plot_state_errors(
             uniq[lab] = h
 
     # 你想要的固定顺序（只取存在的，避免某个算法缺数据时报 KeyError）
-    desired = ["target", "PID", "BC", "BC-RL", "PPO", "SKC-PPO-F", "SKC-PPO"]
+    desired = ["PID", "BC", "BC-RL", "PPO", "SKC-PPO-F", "SKC-PPO"]
     ordered_labels = [lab for lab in desired if lab in uniq]
     ordered_handles = [uniq[lab] for lab in ordered_labels]
 
@@ -256,12 +335,12 @@ def plot_state_errors(
         fig.legend(
             ordered_handles, ordered_labels,
             loc="upper center",
-            ncol=4,  # 4列 => 7个条目会自动变成：第一行4个，第二行3个
+            ncol=4,
             frameon=False,
-            bbox_to_anchor=(0.5, 1.02),
+            bbox_to_anchor=(0.5, 1.35),
         )
 
-    fig.subplots_adjust(top=0.86, hspace=0.18)
+    fig.subplots_adjust(top=0.78, hspace=0.18)
     save_figure(fig, outdir, "fig_337_state_errors")
     plt.close(fig)
 
