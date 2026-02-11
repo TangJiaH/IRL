@@ -272,11 +272,23 @@ def plot_traj3d(series: Dict[str, Dict[str, np.ndarray]], algo_list: List[str], 
     plt.close(fig)
 
 
+def _compute_target_change_idx(target_data: Dict[str, np.ndarray]) -> np.ndarray:
+    diff_mask = None
+    for values in target_data.values():
+        if values is None or len(values) < 2:
+            continue
+        current_mask = np.diff(values) != 0
+        diff_mask = current_mask if diff_mask is None else (diff_mask | current_mask)
+    if diff_mask is None:
+        return np.array([], dtype=int)
+    return np.where(diff_mask)[0] + 1
+
+
 def plot_state_errors(
     series: Dict[str, Dict[str, np.ndarray]],
     algo_list: List[str],
     steps: np.ndarray,
-    target_interval: int,
+    target_series: Dict[str, np.ndarray],
     outdir: str,
     args: argparse.Namespace,
 ) -> None:
@@ -320,11 +332,13 @@ def plot_state_errors(
         axes[2].plot(steps, np.abs(speed_err_obs), label="_nolegend_", color=color, **style)
         legend_handles[algo] = heading_line
 
-    if target_interval > 0 and len(steps) > 0:
-        max_step = int(np.max(steps))
-        for switch_step in range(target_interval, max_step + target_interval, target_interval):
-            for ax in axes:
-                ax.axvline(switch_step, linestyle="--", color="#9e9e9e", alpha=0.25, label="_nolegend_")
+    change_idx = _compute_target_change_idx(target_series)
+    if len(change_idx) > 0 and len(steps) > 0:
+        for ci in change_idx:
+            if 0 <= ci < len(steps):
+                x = steps[ci]
+                for ax in axes:
+                    ax.axvline(x=x, linestyle="--", color="#9e9e9e", alpha=0.35, linewidth=1.2, label="_nolegend_")
 
     axes[0].set_ylabel("|heading_error| (deg)")
     axes[1].set_ylabel("|alt_error| (m)")
@@ -385,9 +399,21 @@ def main() -> None:
     headers, rows = read_csv(args.csv)
     series = prepare_series(rows, args.algos)
 
-    target_interval, _targets = load_targets(args.targets)
+    target_interval, targets = load_targets(args.targets)
     any_algo = next(iter(series.values()), {})
     steps = any_algo.get("step", np.arange(len(next(iter(series.values())).get("heading_error_deg", [])))) if series else np.array([])
+
+    target_series: Dict[str, np.ndarray] = {}
+    for key in ("target_heading_deg", "target_alt_m", "target_speed_mps", "target_error"):
+        if key in any_algo:
+            target_series[key] = any_algo[key]
+    if not target_series and len(steps) > 0:
+        target_heading, target_alt_m, target_speed_mps = build_target_arrays(steps, target_interval, targets)
+        target_series = {
+            "target_heading_deg": target_heading,
+            "target_alt_m": target_alt_m,
+            "target_speed_mps": target_speed_mps,
+        }
 
     algo_metrics: Dict[str, Tuple[float, float]] = {}
     for algo in args.algos:
@@ -407,7 +433,7 @@ def main() -> None:
         print(f"{algo:<12} steady_err={steady_err:>8.4f}  TV_turn={tv_turn:>10.4f}")
 
     plot_traj3d(series, ["PID", "PPO", "SKC-PPO-F", "SKC-PPO"], args.outdir)
-    plot_state_errors(series, args.algos, steps, target_interval, args.outdir, args)
+    plot_state_errors(series, args.algos, steps, target_series, args.outdir, args)
     plot_control_tv(series, ["PID", "PPO", "SKC-PPO-F", "SKC-PPO"], steps, args.outdir)
 
 
