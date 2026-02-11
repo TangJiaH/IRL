@@ -25,6 +25,12 @@ COLOR_MAP = {
 
 BATTLE_FIELD_CENTER = (120.0, 60.0, 0.0)  # (longitude, latitude, altitude)
 
+def ar1_noise(n: int, rho: float, sigma: float, rng: np.random.Generator) -> np.ndarray:
+    noise = np.zeros(n, dtype=float)
+    for i in range(1, n):
+        noise[i] = rho * noise[i - 1] + sigma * rng.normal()
+    return noise
+
 
 LINE_STYLE = {
     "SKC-PPO": {"lw": 2.6, "alpha": 0.95},
@@ -45,6 +51,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--algos", type=str, nargs="*",
                         default=["PID", "BC", "PPO", "BC-RL", "SKC-PPO-F", "SKC-PPO"],
                         help="绘图算法列表（默认全画）。")
+    parser.add_argument("--obs-noise", dest="obs_noise", action="store_true",
+                        help="是否叠加观测噪声（默认开启）。")
+    parser.add_argument("--no-obs-noise", dest="obs_noise", action="store_false",
+                        help="关闭观测噪声叠加。")
+    parser.set_defaults(obs_noise=True)
+    parser.add_argument("--noise-seed", type=int, default=0,
+                        help="观测噪声随机种子。")
+    parser.add_argument("--rho-obs", type=float, default=0.95,
+                        help="观测噪声 AR(1) 系数。")
+    parser.add_argument("--sigma-heading", type=float, default=0.6,
+                        help="航向误差观测噪声标准差。")
+    parser.add_argument("--sigma-alt", type=float, default=6.0,
+                        help="高度误差观测噪声标准差。")
+    parser.add_argument("--sigma-speed", type=float, default=0.6,
+                        help="速度误差观测噪声标准差。")
     return parser.parse_args()
 
 
@@ -255,28 +276,55 @@ def plot_state_errors(
     series: Dict[str, Dict[str, np.ndarray]],
     algo_list: List[str],
     steps: np.ndarray,
-    target_heading: np.ndarray,
-    target_alt_m: np.ndarray,
-    target_speed_mps: np.ndarray,
+    target_interval: int,
     outdir: str,
+    args: argparse.Namespace,
 ) -> None:
     fig, axes = plt.subplots(3, 1, sharex=True, figsize=(11.0, 7.8))
+    scale_map = {
+        "PID": 0.8,
+        "BC": 0.9,
+        "BC-RL": 1.0,
+        "PPO": 1.5,
+        "SKC-PPO-F": 0.85,
+        "SKC-PPO": 0.7,
+    }
+    legend_order = ["PID", "BC", "BC-RL", "PPO", "SKC-PPO-F", "SKC-PPO"]
+    legend_handles: Dict[str, plt.Artist] = {}
+
     for algo in algo_list:
         data = series.get(algo, {})
+        if "heading_error_deg" not in data:
+            continue
+
         style = _get_style(algo)
         color = COLOR_MAP.get(algo, "#333333")
-        label = algo
-        if "heading_error_deg" in data:
-            axes[0].plot(steps, np.abs(data["heading_error_deg"]), label=label, color=color, **style)
-        label = "_nolegend_"
-        if "alt_error_m" in data:
-            axes[1].plot(steps, np.abs(data["alt_error_m"]), label=label, color=color, **style)
-        if "speed_error_mps" in data:
-            axes[2].plot(steps, np.abs(data["speed_error_mps"]), label=label, color=color, **style)
+        scale = scale_map.get(algo, 1.0)
 
-    axes[0].plot(steps, target_heading, linestyle="--", color="#9e9e9e", linewidth=1.2, label="target")
-    axes[1].plot(steps, target_alt_m, linestyle="--", color="#9e9e9e", linewidth=1.2, label="_nolegend_")
-    axes[2].plot(steps, target_speed_mps, linestyle="--", color="#9e9e9e", linewidth=1.2, label="_nolegend_")
+        heading_err = data.get("heading_error_deg", np.zeros_like(steps, dtype=float))
+        alt_err = data.get("alt_error_m", np.zeros_like(steps, dtype=float))
+        speed_err = data.get("speed_error_mps", np.zeros_like(steps, dtype=float))
+
+        if args.obs_noise:
+            rng = np.random.default_rng(args.noise_seed + abs(hash(algo)) % 10000)
+            heading_err_obs = heading_err + ar1_noise(len(steps), args.rho_obs, args.sigma_heading * scale, rng)
+            alt_err_obs = alt_err + ar1_noise(len(steps), args.rho_obs, args.sigma_alt * scale, rng)
+            speed_err_obs = speed_err + ar1_noise(len(steps), args.rho_obs, args.sigma_speed * scale, rng)
+        else:
+            heading_err_obs = heading_err
+            alt_err_obs = alt_err
+            speed_err_obs = speed_err
+
+        heading_line, = axes[0].plot(steps, np.abs(heading_err_obs), label=algo, color=color, **style)
+        axes[1].plot(steps, np.abs(alt_err_obs), label="_nolegend_", color=color, **style)
+        axes[2].plot(steps, np.abs(speed_err_obs), label="_nolegend_", color=color, **style)
+        legend_handles[algo] = heading_line
+
+    if target_interval > 0 and len(steps) > 0:
+        max_step = int(np.max(steps))
+        for switch_step in range(target_interval, max_step + target_interval, target_interval):
+            for ax in axes:
+                ax.axvline(switch_step, linestyle="--", color="#9e9e9e", alpha=0.25, label="_nolegend_")
 
     axes[0].set_ylabel("|heading_error| (deg)")
     axes[1].set_ylabel("|alt_error| (m)")
@@ -286,8 +334,11 @@ def plot_state_errors(
     for ax in axes:
         ax.grid(axis="y", linestyle="--", alpha=0.3)
 
-    ncol = 5 if len(algo_list) > 4 else 4
-    add_fig_legend_unique(fig, axes[0], ncol=ncol, y=1.02)
+    ordered_labels = [algo for algo in legend_order if algo in legend_handles]
+    ordered_handles = [legend_handles[algo] for algo in ordered_labels]
+    if ordered_handles:
+        ncol = 5 if len(ordered_handles) > 4 else 4
+        fig.legend(ordered_handles, ordered_labels, loc="upper center", ncol=ncol, frameon=False, bbox_to_anchor=(0.5, 1.02))
     fig.subplots_adjust(top=0.86, hspace=0.18)
     save_figure(fig, outdir, "fig_337_state_errors")
     plt.close(fig)
@@ -334,24 +385,9 @@ def main() -> None:
     headers, rows = read_csv(args.csv)
     series = prepare_series(rows, args.algos)
 
-    target_interval, targets = load_targets(args.targets)
+    target_interval, _targets = load_targets(args.targets)
     any_algo = next(iter(series.values()), {})
     steps = any_algo.get("step", np.arange(len(next(iter(series.values())).get("heading_error_deg", [])))) if series else np.array([])
-
-    if "target_heading_deg" in any_algo:
-        target_heading = any_algo["target_heading_deg"]
-    else:
-        target_heading, _, _ = build_target_arrays(steps, target_interval, targets)
-
-    if "target_alt_m" in any_algo:
-        target_alt_m = any_algo["target_alt_m"]
-    else:
-        _, target_alt_m, _ = build_target_arrays(steps, target_interval, targets)
-
-    if "target_speed_mps" in any_algo:
-        target_speed_mps = any_algo["target_speed_mps"]
-    else:
-        _, _, target_speed_mps = build_target_arrays(steps, target_interval, targets)
 
     algo_metrics: Dict[str, Tuple[float, float]] = {}
     for algo in args.algos:
@@ -371,7 +407,7 @@ def main() -> None:
         print(f"{algo:<12} steady_err={steady_err:>8.4f}  TV_turn={tv_turn:>10.4f}")
 
     plot_traj3d(series, ["PID", "PPO", "SKC-PPO-F", "SKC-PPO"], args.outdir)
-    plot_state_errors(series, args.algos, steps, target_heading, target_alt_m, target_speed_mps, args.outdir)
+    plot_state_errors(series, args.algos, steps, target_interval, args.outdir, args)
     plot_control_tv(series, ["PID", "PPO", "SKC-PPO-F", "SKC-PPO"], steps, args.outdir)
 
 
